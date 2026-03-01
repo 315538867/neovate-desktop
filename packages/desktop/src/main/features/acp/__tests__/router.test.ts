@@ -10,6 +10,9 @@ function makeContext(overrides?: Partial<AppContext["acpConnectionManager"]>): A
     acpConnectionManager: {
       connect: vi.fn(),
       get: vi.fn(),
+      getOrThrow: vi.fn().mockImplementation((id: string) => {
+        throw new ORPCError("NOT_FOUND", { defined: true, message: `Unknown connection: ${id}` });
+      }),
       getClient: vi.fn(),
       getStderr: vi.fn().mockReturnValue([]),
       disconnect: vi.fn(),
@@ -65,7 +68,7 @@ describe("acpRouter", () => {
       } as any);
 
       const context = makeContext({
-        get: vi.fn().mockReturnValue(fakeConn),
+        getOrThrow: vi.fn().mockReturnValue(fakeConn),
       });
 
       const result = await call(acpRouter.newSession, { connectionId: "acp-1" }, { context });
@@ -74,9 +77,7 @@ describe("acpRouter", () => {
     });
 
     it("throws NOT_FOUND for unknown connection", async () => {
-      const context = makeContext({
-        get: vi.fn().mockReturnValue(undefined),
-      });
+      const context = makeContext();
 
       await expect(
         call(acpRouter.newSession, { connectionId: "unknown" }, { context }),
@@ -90,7 +91,7 @@ describe("acpRouter", () => {
       vi.spyOn(fakeConn, "resolvePermission");
 
       const context = makeContext({
-        get: vi.fn().mockReturnValue(fakeConn),
+        getOrThrow: vi.fn().mockReturnValue(fakeConn),
       });
 
       await call(
@@ -103,9 +104,7 @@ describe("acpRouter", () => {
     });
 
     it("throws NOT_FOUND for unknown connection", async () => {
-      const context = makeContext({
-        get: vi.fn().mockReturnValue(undefined),
-      });
+      const context = makeContext();
 
       await expect(
         call(
@@ -125,7 +124,7 @@ describe("acpRouter", () => {
       } as any);
 
       const context = makeContext({
-        get: vi.fn().mockReturnValue(fakeConn),
+        getOrThrow: vi.fn().mockReturnValue(fakeConn),
       });
 
       await call(acpRouter.cancel, { connectionId: "acp-1", sessionId: "s1" }, { context });
@@ -134,9 +133,7 @@ describe("acpRouter", () => {
     });
 
     it("throws NOT_FOUND for unknown connection", async () => {
-      const context = makeContext({
-        get: vi.fn().mockReturnValue(undefined),
-      });
+      const context = makeContext();
 
       await expect(
         call(acpRouter.cancel, { connectionId: "unknown", sessionId: "s1" }, { context }),
