@@ -32,6 +32,16 @@ Flags for `bun ready`:
 - `--build` — also run full build
 - `--e2e` — also run e2e tests
 
+## Tips
+
+Enable ACP debug logs during development:
+
+```sh
+ACP_DEBUG=1 bun dev 2>&1 | tee /tmp/dev.log
+```
+
+This prints logs to the terminal and saves them to `/tmp/dev.log` for searching with `grep` or `less`.
+
 ## Code Style
 
 - Linting: [oxlint](https://oxc.rs/)
