@@ -75,7 +75,11 @@ export function useAcpPrompt() {
           }
           appendChunk(resolvedSessionId, event);
         }
-        acpPromptLog("sendPrompt: completed", { connectionId, sessionId: resolvedSessionId, eventCount });
+        acpPromptLog("sendPrompt: completed", {
+          connectionId,
+          sessionId: resolvedSessionId,
+          eventCount,
+        });
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           return;
@@ -92,7 +96,11 @@ export function useAcpPrompt() {
         }
 
         useAcpStore.getState().setPromptError(resolvedSessionId, message);
-        console.error("[acp-prompt] sendPrompt failed", { connectionId, sessionId: resolvedSessionId, error });
+        console.error("[acp-prompt] sendPrompt failed", {
+          connectionId,
+          sessionId: resolvedSessionId,
+          error,
+        });
       } finally {
         setStreaming(resolvedSessionId, false);
         abortRef.current = null;

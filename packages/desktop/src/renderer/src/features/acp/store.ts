@@ -49,7 +49,11 @@ type AcpState = {
   setActiveSession: (sessionId: string | null) => void;
   setActiveConnectionId: (connectionId: string | null) => void;
   setAgentSessions: (sessions: SessionInfo[]) => void;
-  createSession: (sessionId: string, connectionId: string, meta?: { title?: string; createdAt?: string }) => void;
+  createSession: (
+    sessionId: string,
+    connectionId: string,
+    meta?: { title?: string; createdAt?: string },
+  ) => void;
   removeSession: (sessionId: string) => void;
   addUserMessage: (sessionId: string, content: string) => void;
   setStreaming: (sessionId: string, streaming: boolean) => void;

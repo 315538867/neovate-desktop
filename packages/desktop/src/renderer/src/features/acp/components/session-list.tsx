@@ -2,7 +2,6 @@ import { useCallback, useState } from "react";
 import { useAcpStore } from "../store";
 import { client } from "../../../orpc";
 import { cn } from "../../../lib/utils";
-import { Button } from "../../../components/ui/button";
 
 function timeAgo(iso: string): string {
   const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -22,27 +21,12 @@ export function SessionList() {
   const activeSessionId = useAcpStore((s) => s.activeSessionId);
   const setActiveSession = useAcpStore((s) => s.setActiveSession);
   const agentSessions = useAcpStore((s) => s.agentSessions);
-  const setAgentSessions = useAcpStore((s) => s.setAgentSessions);
   const createSession = useAcpStore((s) => s.createSession);
   const appendChunk = useAcpStore((s) => s.appendChunk);
 
-  const [loading, setLoading] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
 
   const connectionId = useAcpStore((s) => s.activeConnectionId);
-
-  const refresh = useCallback(async () => {
-    if (!connectionId) return;
-    setLoading(true);
-    try {
-      const list = await client.acp.listSessions({ connectionId });
-      setAgentSessions(list);
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  }, [connectionId, setAgentSessions]);
 
   const loadSession = useCallback(
     async (sessionId: string) => {
@@ -56,7 +40,11 @@ export function SessionList() {
       try {
         // Create the store session first so appendChunk has a target
         const info = agentSessions.find((s) => s.sessionId === sessionId);
-        createSession(sessionId, connectionId, info ? { title: info.title, createdAt: info.createdAt } : undefined);
+        createSession(
+          sessionId,
+          connectionId,
+          info ? { title: info.title, createdAt: info.createdAt } : undefined,
+        );
         const iterator = await client.acp.loadSession({ connectionId, sessionId });
         for await (const event of iterator) {
           appendChunk(sessionId, event);
@@ -89,18 +77,6 @@ export function SessionList() {
 
   return (
     <div className="flex flex-col gap-1">
-      {connectionId && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 w-full text-[10px]"
-          onClick={refresh}
-          disabled={loading}
-        >
-          {loading ? "Refreshing..." : "Refresh"}
-        </Button>
-      )}
-
       <ul className="flex flex-col gap-0.5">
         {/* In-memory sessions */}
         {inMemory.map((session) => (
@@ -115,11 +91,14 @@ export function SessionList() {
                   : "text-muted-foreground hover:bg-accent/50",
               )}
             >
-              <span className="block truncate font-mono">{session.title || session.sessionId.slice(0, 8)}</span>
+              <span className="block truncate font-mono">
+                {session.title || session.sessionId.slice(0, 8)}
+              </span>
               <span className="block truncate text-[10px] opacity-60">
                 {session.messages.length} message{session.messages.length !== 1 && "s"}
                 {session.streaming && " \u00b7 streaming"}
-                {" \u00b7 "}{timeAgo(session.createdAt)}
+                {" \u00b7 "}
+                {timeAgo(session.createdAt)}
               </span>
             </button>
           </li>
