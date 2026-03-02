@@ -41,11 +41,13 @@ type AcpState = {
   agents: AgentInfo[];
   sessions: Map<string, AcpSession>;
   activeSessionId: string | null;
+  activeConnectionId: string | null;
   agentSessions: SessionInfo[];
   _nextMessageId: number;
 
   setAgents: (agents: AgentInfo[]) => void;
   setActiveSession: (sessionId: string | null) => void;
+  setActiveConnectionId: (connectionId: string | null) => void;
   setAgentSessions: (sessions: SessionInfo[]) => void;
   createSession: (sessionId: string, connectionId: string, meta?: { title?: string; createdAt?: string }) => void;
   removeSession: (sessionId: string) => void;
@@ -61,12 +63,15 @@ export const useAcpStore = create<AcpState>()(
     agents: [],
     sessions: new Map(),
     activeSessionId: null,
+    activeConnectionId: null,
     agentSessions: [],
     _nextMessageId: 0,
 
     setAgents: (agents) => set({ agents }),
 
     setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
+
+    setActiveConnectionId: (activeConnectionId) => set({ activeConnectionId }),
 
     setAgentSessions: (agentSessions) => set({ agentSessions }),
 

@@ -6,7 +6,7 @@ import { useAcpStore } from "../store";
 export function useAcpConnect() {
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
-  const createSession = useAcpStore((s) => s.createSession);
+  const setActiveConnectionId = useAcpStore((s) => s.setActiveConnectionId);
   const setAgentSessions = useAcpStore((s) => s.setAgentSessions);
 
   const connect = useCallback(
@@ -15,11 +15,7 @@ export function useAcpConnect() {
       setConnectError(null);
       try {
         const { connectionId } = await client.acp.connect({ agentId, cwd });
-        const { sessionId } = await client.acp.newSession({
-          connectionId,
-          cwd,
-        });
-        createSession(sessionId, connectionId);
+        setActiveConnectionId(connectionId);
 
         // Fetch persisted sessions after connect
         client.acp
@@ -27,7 +23,7 @@ export function useAcpConnect() {
           .then(setAgentSessions)
           .catch(() => {});
 
-        return { connectionId, sessionId };
+        return { connectionId };
       } catch (error) {
         const message =
           error instanceof ORPCError || error instanceof Error
@@ -39,7 +35,7 @@ export function useAcpConnect() {
         setConnecting(false);
       }
     },
-    [createSession, setAgentSessions],
+    [setActiveConnectionId, setAgentSessions],
   );
 
   return { connect, connecting, connectError };

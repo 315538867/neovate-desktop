@@ -19,6 +19,7 @@ export function useAcpPrompt() {
   const addUserMessage = useAcpStore((s) => s.addUserMessage);
   const appendChunk = useAcpStore((s) => s.appendChunk);
   const setStreaming = useAcpStore((s) => s.setStreaming);
+  const createSession = useAcpStore((s) => s.createSession);
 
   useEffect(() => {
     return () => {
@@ -27,25 +28,38 @@ export function useAcpPrompt() {
   }, []);
 
   const sendPrompt = useCallback(
-    async (connectionId: string, sessionId: string, prompt: string) => {
+    async (connectionId: string, sessionId: string | undefined, prompt: string) => {
+      let resolvedSessionId = sessionId;
+
+      // Lazy session creation: if no session yet, create one first
+      if (!resolvedSessionId) {
+        acpPromptLog("sendPrompt: creating session", { connectionId });
+        const { sessionId: newSessionId } = await client.acp.newSession({
+          connectionId,
+        });
+        resolvedSessionId = newSessionId;
+        createSession(resolvedSessionId, connectionId);
+        acpPromptLog("sendPrompt: session created", { connectionId, sessionId: resolvedSessionId });
+      }
+
       acpPromptLog("sendPrompt: start", {
         connectionId,
-        sessionId,
+        sessionId: resolvedSessionId,
         promptLength: prompt.length,
       });
-      useAcpStore.getState().setPromptError(sessionId, null);
-      addUserMessage(sessionId, prompt);
-      setStreaming(sessionId, true);
+      useAcpStore.getState().setPromptError(resolvedSessionId, null);
+      addUserMessage(resolvedSessionId, prompt);
+      setStreaming(resolvedSessionId, true);
 
       const ac = new AbortController();
       abortRef.current = ac;
 
       try {
         const iterator = await client.acp.prompt(
-          { connectionId, sessionId, prompt },
+          { connectionId, sessionId: resolvedSessionId, prompt },
           { signal: ac.signal },
         );
-        acpPromptLog("sendPrompt: iterator ready", { connectionId, sessionId });
+        acpPromptLog("sendPrompt: iterator ready", { connectionId, sessionId: resolvedSessionId });
 
         let eventCount = 0;
 
@@ -54,14 +68,14 @@ export function useAcpPrompt() {
           if (eventCount <= 10) {
             acpPromptLog("sendPrompt: event", {
               connectionId,
-              sessionId,
+              sessionId: resolvedSessionId,
               eventType: event.type,
               eventCount,
             });
           }
-          appendChunk(sessionId, event);
+          appendChunk(resolvedSessionId, event);
         }
-        acpPromptLog("sendPrompt: completed", { connectionId, sessionId, eventCount });
+        acpPromptLog("sendPrompt: completed", { connectionId, sessionId: resolvedSessionId, eventCount });
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           return;
@@ -77,15 +91,15 @@ export function useAcpPrompt() {
           message = "Agent request failed. Please try again.";
         }
 
-        useAcpStore.getState().setPromptError(sessionId, message);
-        console.error("[acp-prompt] sendPrompt failed", { connectionId, sessionId, error });
+        useAcpStore.getState().setPromptError(resolvedSessionId, message);
+        console.error("[acp-prompt] sendPrompt failed", { connectionId, sessionId: resolvedSessionId, error });
       } finally {
-        setStreaming(sessionId, false);
+        setStreaming(resolvedSessionId, false);
         abortRef.current = null;
-        acpPromptLog("sendPrompt: cleanup", { connectionId, sessionId });
+        acpPromptLog("sendPrompt: cleanup", { connectionId, sessionId: resolvedSessionId });
       }
     },
-    [addUserMessage, appendChunk, setStreaming],
+    [addUserMessage, appendChunk, setStreaming, createSession],
   );
 
   const cancel = useCallback(async (connectionId: string, sessionId: string) => {

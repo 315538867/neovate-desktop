@@ -29,9 +29,7 @@ export function SessionList() {
   const [loading, setLoading] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
 
-  // Get connectionId from any active in-memory session
-  const anySession = Array.from(sessions.values())[0];
-  const connectionId = anySession?.connectionId;
+  const connectionId = useAcpStore((s) => s.activeConnectionId);
 
   const refresh = useCallback(async () => {
     if (!connectionId) return;

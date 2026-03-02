@@ -18,6 +18,7 @@ export function AgentChat() {
   const agents = useAcpStore((s) => s.agents);
   const setAgents = useAcpStore((s) => s.setAgents);
   const activeSessionId = useAcpStore((s) => s.activeSessionId);
+  const activeConnectionId = useAcpStore((s) => s.activeConnectionId);
   const sessions = useAcpStore((s) => s.sessions);
 
   const { connect, connecting } = useAcpConnect();
@@ -36,8 +37,8 @@ export function AgentChat() {
   };
 
   const handleSend = (message: string) => {
-    if (!activeSession) return;
-    sendPrompt(activeSession.connectionId, activeSession.sessionId, message);
+    if (!activeConnectionId) return;
+    sendPrompt(activeConnectionId, activeSession?.sessionId, message);
   };
 
   const handleCancel = () => {
@@ -50,7 +51,8 @@ export function AgentChat() {
     resolvePermission(activeSession.connectionId, activeSession.sessionId, requestId, optionId);
   };
 
-  if (!activeSession) {
+  // State 1: No connection — show agent selector
+  if (!activeConnectionId && !activeSession) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 p-8">
         <h2 className="text-xl font-semibold">Connect to an Agent</h2>
@@ -70,6 +72,17 @@ export function AgentChat() {
     );
   }
 
+  // State 2: Connected but no session yet — show empty chat with input
+  if (!activeSession) {
+    return (
+      <div className="flex h-full flex-col">
+        <MessageList messages={[]} toolCalls={new Map()} />
+        <MessageInput onSend={handleSend} onCancel={() => {}} streaming={false} />
+      </div>
+    );
+  }
+
+  // State 3: Active session — full chat
   return (
     <div className="flex h-full flex-col">
       <MessageList messages={activeSession.messages} toolCalls={activeSession.toolCalls} />
