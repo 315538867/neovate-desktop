@@ -6,6 +6,13 @@ export type AgentInfo = {
   name: string;
 };
 
+export type TimingEntry = {
+  phase: string;
+  label: string;
+  durationMs: number;
+  timestamp: number;
+};
+
 /** What the eventIterator yields to the renderer */
 export type StreamEvent =
   | { type: "acpx_event"; event: AcpxEvent }
@@ -14,7 +21,8 @@ export type StreamEvent =
       type: "permission_request";
       requestId: string;
       data: RequestPermissionRequest;
-    };
+    }
+  | { type: "timing"; entry: TimingEntry };
 
 /** Lightweight session metadata for the sidebar list */
 export type SessionInfo = {

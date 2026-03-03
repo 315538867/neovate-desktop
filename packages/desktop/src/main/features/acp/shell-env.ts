@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import debug from "debug";
+
+const shellEnvLog = debug("neovate:acp-shell-env");
 
 /** Env vars we care about extracting from the user's interactive shell. */
 const RELEVANT_VARS = new Set([
@@ -25,8 +28,12 @@ let cached: Record<string, string> | null = null;
  * Results are cached for the lifetime of the app.
  */
 export async function getShellEnvironment(): Promise<Record<string, string>> {
-  if (cached) return cached;
+  if (cached) {
+    shellEnvLog("using cached shell environment");
+    return cached;
+  }
 
+  const t0 = performance.now();
   try {
     const raw = await extractEnvFromShell();
     cached = filterRelevantVars(raw);
@@ -34,6 +41,8 @@ export async function getShellEnvironment(): Promise<Record<string, string>> {
     cached = {};
   }
 
+  const elapsed = Math.round(performance.now() - t0);
+  shellEnvLog("shell environment resolved in %dms (keys: %o)", elapsed, Object.keys(cached));
   return cached;
 }
 

@@ -1,7 +1,12 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { enableMapSet } from "immer";
-import type { AgentInfo, SessionInfo, StreamEvent } from "../../../../shared/features/acp/types";
+import type {
+  AgentInfo,
+  SessionInfo,
+  StreamEvent,
+  TimingEntry,
+} from "../../../../shared/features/acp/types";
 import type { RequestPermissionRequest } from "@agentclientprotocol/sdk";
 
 enableMapSet();
@@ -45,6 +50,7 @@ type AcpState = {
   activeConnectionId: string | null;
   agentSessions: SessionInfo[];
   connectionsByProject: Map<string, string>;
+  timings: TimingEntry[];
   _nextMessageId: number;
 
   setAgents: (agents: AgentInfo[]) => void;
@@ -64,6 +70,8 @@ type AcpState = {
   setPromptError: (sessionId: string, error: string | null) => void;
   setPendingPermission: (sessionId: string, perm: PendingPermission | null) => void;
   appendChunk: (sessionId: string, event: StreamEvent) => void;
+  addTiming: (entry: TimingEntry) => void;
+  clearTimings: () => void;
 };
 
 export const useAcpStore = create<AcpState>()(
@@ -74,6 +82,7 @@ export const useAcpStore = create<AcpState>()(
     activeConnectionId: null,
     agentSessions: [],
     connectionsByProject: new Map(),
+    timings: [],
     _nextMessageId: 0,
 
     setAgents: (agents) => set({ agents }),
@@ -158,10 +167,23 @@ export const useAcpStore = create<AcpState>()(
       });
     },
 
+    addTiming: (entry) => {
+      set((state) => {
+        state.timings.push(entry);
+      });
+    },
+
+    clearTimings: () => set({ timings: [] }),
+
     appendChunk: (sessionId, event) => {
       set((state) => {
         const session = state.sessions.get(sessionId);
         if (!session) return;
+
+        if (event.type === "timing") {
+          state.timings.push(event.entry);
+          return;
+        }
 
         if (event.type === "permission_request") {
           session.pendingPermission = {

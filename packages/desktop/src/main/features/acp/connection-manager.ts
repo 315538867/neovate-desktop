@@ -1,10 +1,16 @@
 import { AcpClient, resolveAgentCommand, type SessionRecord } from "acpx";
 import { ORPCError } from "@orpc/server";
+import debug from "debug";
 import { AcpConnection } from "./connection";
 import { getShellEnvironment } from "./shell-env";
 
+const cmLog = debug("neovate:acp-connection-manager");
+
 const MAX_STDERR_LINES = 100;
 
+// PERF: `npx -y` resolves and potentially downloads the package on every
+// invocation. This adds 5-15s+ to cold starts. Consider pre-installing the
+// package or caching the resolved binary path to eliminate this overhead.
 export const AGENT_OVERRIDES: Record<string, string> = {
   claude: "npx -y @zed-industries/claude-agent-acp",
 };
@@ -23,8 +29,13 @@ export class AcpConnectionManager {
   private nextId = 0;
 
   async connect(agentName: string, cwd?: string): Promise<AcpConnection> {
+    const connectStart = performance.now();
     const id = `acp-${++this.nextId}`;
+    cmLog("connect[%s]: starting (agent=%s, cwd=%s)", id, agentName, cwd);
+
+    const shellEnvStart = performance.now();
     const shellEnv = await getShellEnvironment();
+    cmLog("connect[%s]: shellEnv resolved in %dms", id, Math.round(performance.now() - shellEnvStart));
 
     const mergedPath = [shellEnv.PATH, process.env.PATH].filter(Boolean).join(":");
 
@@ -34,6 +45,7 @@ export class AcpConnectionManager {
     };
 
     const agentCommand = resolveAgentCommand(agentName, AGENT_OVERRIDES);
+    cmLog("connect[%s]: agentCommand=%s", id, agentCommand);
 
     const stderrLines: string[] = [];
     const connection = new AcpConnection(id);
@@ -50,9 +62,15 @@ export class AcpConnectionManager {
         stderrLines.push(line);
         if (stderrLines.length > MAX_STDERR_LINES) stderrLines.shift();
       },
+      onTiming: (label: string, durationMs: number) => {
+        cmLog("connect[%s]: acpx %s took %dms", id, label, durationMs);
+      },
     });
 
+    const clientStartTime = performance.now();
     await client.start();
+    cmLog("connect[%s]: client.start() completed in %dms", id, Math.round(performance.now() - clientStartTime));
+
     connection.setClient(client);
 
     const resolvedCwd = cwd ?? process.cwd();
@@ -64,6 +82,8 @@ export class AcpConnectionManager {
       stderr: stderrLines,
       sessionRecords: new Map(),
     });
+
+    cmLog("connect[%s]: total connect time %dms", id, Math.round(performance.now() - connectStart));
     return connection;
   }
 

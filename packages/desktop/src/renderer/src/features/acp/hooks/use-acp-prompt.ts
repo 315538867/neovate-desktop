@@ -13,6 +13,7 @@ export function useAcpPrompt() {
   const appendChunk = useAcpStore((s) => s.appendChunk);
   const setStreaming = useAcpStore((s) => s.setStreaming);
   const createSession = useAcpStore((s) => s.createSession);
+  const addTiming = useAcpStore((s) => s.addTiming);
 
   useEffect(() => {
     return () => {
@@ -22,22 +23,26 @@ export function useAcpPrompt() {
 
   const sendPrompt = useCallback(
     async (connectionId: string, sessionId: string | undefined, prompt: string) => {
+      const promptStart = performance.now();
       let resolvedSessionId = sessionId;
 
-      // Lazy session creation: if no session yet, create one first
       if (!resolvedSessionId) {
+        const sessionStart = performance.now();
         acpPromptLog("sendPrompt: creating session", { connectionId });
         const { sessionId: newSessionId } = await client.acp.newSession({
           connectionId,
         });
         resolvedSessionId = newSessionId;
+        const sessionElapsed = Math.round(performance.now() - sessionStart);
+        acpPromptLog("sendPrompt: session created in %dms", sessionElapsed, { connectionId, sessionId: resolvedSessionId });
+        addTiming({ phase: "prompt", label: "newSession", durationMs: sessionElapsed, timestamp: Date.now() });
+
         const projectPath = useProjectStore.getState().activeProject?.path;
         createSession(
           resolvedSessionId,
           connectionId,
           projectPath ? { cwd: projectPath } : undefined,
         );
-        acpPromptLog("sendPrompt: session created", { connectionId, sessionId: resolvedSessionId });
       }
 
       acpPromptLog("sendPrompt: start", {
@@ -53,16 +58,26 @@ export function useAcpPrompt() {
       abortRef.current = ac;
 
       try {
+        const rpcStart = performance.now();
         const iterator = await client.acp.prompt(
           { connectionId, sessionId: resolvedSessionId, prompt },
           { signal: ac.signal },
         );
-        acpPromptLog("sendPrompt: iterator ready", { connectionId, sessionId: resolvedSessionId });
+        const rpcElapsed = Math.round(performance.now() - rpcStart);
+        acpPromptLog("sendPrompt: iterator ready in %dms", rpcElapsed, { connectionId, sessionId: resolvedSessionId });
+        addTiming({ phase: "prompt", label: "rpc_setup", durationMs: rpcElapsed, timestamp: Date.now() });
 
         let eventCount = 0;
+        let firstEventAt: number | undefined;
 
         for await (const event of iterator) {
           eventCount += 1;
+          if (!firstEventAt) {
+            firstEventAt = performance.now();
+            const ttfe = Math.round(firstEventAt - promptStart);
+            acpPromptLog("sendPrompt: first event after %dms", ttfe, { eventType: event.type });
+            addTiming({ phase: "prompt", label: "time_to_first_event", durationMs: ttfe, timestamp: Date.now() });
+          }
           if (eventCount <= 10) {
             acpPromptLog("sendPrompt: event", {
               connectionId,
@@ -73,11 +88,12 @@ export function useAcpPrompt() {
           }
           appendChunk(resolvedSessionId, event);
         }
-        acpPromptLog("sendPrompt: completed", {
+        const totalElapsed = Math.round(performance.now() - promptStart);
+        acpPromptLog("sendPrompt: completed in %dms (events=%d)", totalElapsed, eventCount, {
           connectionId,
           sessionId: resolvedSessionId,
-          eventCount,
         });
+        addTiming({ phase: "prompt", label: "total", durationMs: totalElapsed, timestamp: Date.now() });
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           return;
@@ -105,7 +121,7 @@ export function useAcpPrompt() {
         acpPromptLog("sendPrompt: cleanup", { connectionId, sessionId: resolvedSessionId });
       }
     },
-    [addUserMessage, appendChunk, setStreaming, createSession],
+    [addUserMessage, appendChunk, setStreaming, createSession, addTiming],
   );
 
   const cancel = useCallback(async (connectionId: string, sessionId: string) => {

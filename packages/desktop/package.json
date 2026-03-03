@@ -31,7 +31,7 @@
     "@electron-toolkit/utils": "^4.0.0",
     "@orpc/contract": "^1.13.5",
     "@orpc/server": "^1.13.5",
-    "acpx": "github:neovateai/acpx#e9c0e00",
+    "acpx": "github:neovateai/acpx#c26a94e",
     "debug": "^4.4.3",
     "electron-store": "^11.0.2",
     "electron-updater": "^6.3.9",

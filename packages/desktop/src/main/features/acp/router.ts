@@ -12,6 +12,7 @@ import {
 } from "acpx";
 import debug from "debug";
 import { acpContract } from "../../../shared/features/acp/contract";
+import type { StreamEvent } from "../../../shared/features/acp/types";
 import { AGENT_OVERRIDES } from "./connection-manager";
 import type { AppContext } from "../../router";
 import type { AcpConnectionManager } from "./connection-manager";
@@ -47,29 +48,44 @@ function buildPromptError(
   });
 }
 
+function timingEntry(phase: string, label: string, durationMs: number): StreamEvent {
+  return {
+    type: "timing",
+    entry: {
+      phase,
+      label,
+      durationMs: Math.round(durationMs * 100) / 100,
+      timestamp: Date.now(),
+    },
+  };
+}
+
 export const acpRouter = os.acp.router({
   listAgents: os.acp.listAgents.handler(() => {
     return listBuiltInAgents(AGENT_OVERRIDES).map((name) => ({ id: name, name }));
   }),
 
   connect: os.acp.connect.handler(async ({ input, context }) => {
+    const t0 = performance.now();
     acpLog("connect: start", { agentId: input.agentId, cwd: input.cwd });
 
     try {
       const connection = await context.acpConnectionManager.connect(input.agentId, input.cwd);
-      acpLog("connect: success", { connectionId: connection.id, agentId: input.agentId });
+      const elapsed = Math.round(performance.now() - t0);
+      acpLog("connect: success in %dms", elapsed, { connectionId: connection.id, agentId: input.agentId });
       return { connectionId: connection.id };
     } catch (error) {
       const message =
         error instanceof AgentSpawnError || error instanceof Error
           ? `Failed to start agent "${input.agentId}": ${error.message}`
           : `Failed to start agent "${input.agentId}"`;
-      acpLog("connect: failed", { agentId: input.agentId, error: message });
+      acpLog("connect: failed after %dms", Math.round(performance.now() - t0), { agentId: input.agentId, error: message });
       throw new ORPCError("BAD_GATEWAY", { defined: true, message });
     }
   }),
 
   newSession: os.acp.newSession.handler(async ({ input, context }) => {
+    const t0 = performance.now();
     acpLog("newSession: start", { connectionId: input.connectionId, cwd: input.cwd });
     const manager = context.acpConnectionManager;
     const conn = manager.getOrThrow(input.connectionId);
@@ -98,7 +114,8 @@ export const acpRouter = os.acp.router({
     manager.setSessionRecord(input.connectionId, record);
     writeSessionRecord(record).catch(() => {});
 
-    acpLog("newSession: success", {
+    const elapsed = Math.round(performance.now() - t0);
+    acpLog("newSession: success in %dms", elapsed, {
       connectionId: input.connectionId,
       sessionId: result.sessionId,
       agentSessionId: result.agentSessionId,
@@ -107,6 +124,7 @@ export const acpRouter = os.acp.router({
   }),
 
   listSessions: os.acp.listSessions.handler(async ({ input, context }) => {
+    const t0 = performance.now();
     acpLog("listSessions: start", { connectionId: input.connectionId });
     context.acpConnectionManager.getOrThrow(input.connectionId);
 
@@ -127,14 +145,15 @@ export const acpRouter = os.acp.router({
       createdAt: r.createdAt,
     }));
 
-    acpLog("listSessions: success", {
+    acpLog("listSessions: success in %dms (count=%d)", Math.round(performance.now() - t0), sessions.length, {
       connectionId: input.connectionId,
-      count: sessions.length,
     });
     return sessions;
   }),
 
   loadSession: os.acp.loadSession.handler(async function* ({ input, signal, context }) {
+    const t0 = performance.now();
+    let firstEventAt: number | undefined;
     acpLog("loadSession: start", {
       connectionId: input.connectionId,
       sessionId: input.sessionId,
@@ -152,6 +171,7 @@ export const acpRouter = os.acp.router({
 
     let loadResult: { agentSessionId?: string } | undefined;
     let loadError: unknown;
+    let eventCount = 0;
 
     const loadPromise = conn.client
       .loadSession(input.sessionId, input.cwd)
@@ -176,6 +196,8 @@ export const acpRouter = os.acp.router({
 
     try {
       for await (const event of subscription) {
+        eventCount += 1;
+        if (!firstEventAt) firstEventAt = performance.now();
         yield event;
       }
     } catch (e: unknown) {
@@ -189,15 +211,21 @@ export const acpRouter = os.acp.router({
     await loadPromise;
     if (loadError) throw loadError;
 
-    acpLog("loadSession: success", {
+    const totalMs = performance.now() - t0;
+    const ttfe = firstEventAt ? firstEventAt - t0 : totalMs;
+    acpLog("loadSession: success in %dms (ttfe=%dms, events=%d)", Math.round(totalMs), Math.round(ttfe), eventCount, {
       connectionId: input.connectionId,
       sessionId: input.sessionId,
       agentSessionId: loadResult?.agentSessionId,
     });
+    yield timingEntry("loadSession", "time_to_first_event", ttfe);
+    yield timingEntry("loadSession", "total", totalMs);
     return { sessionId: input.sessionId, agentSessionId: loadResult?.agentSessionId };
   }),
 
   prompt: os.acp.prompt.handler(async function* ({ input, signal, context }) {
+    const t0 = performance.now();
+    let firstEventAt: number | undefined;
     acpLog("prompt: start", {
       connectionId: input.connectionId,
       sessionId: input.sessionId,
@@ -240,6 +268,7 @@ export const acpRouter = os.acp.router({
     try {
       for await (const event of subscription) {
         eventCount += 1;
+        if (!firstEventAt) firstEventAt = performance.now();
         if (eventCount <= 10) {
           acpLog("prompt: event", {
             connectionId: input.connectionId,
@@ -276,12 +305,15 @@ export const acpRouter = os.acp.router({
       writeSessionRecord(record).catch(() => {});
     }
 
-    acpLog("prompt: done", {
+    const totalMs = performance.now() - t0;
+    const ttfe = firstEventAt ? firstEventAt - t0 : totalMs;
+    acpLog("prompt: done in %dms (ttfe=%dms, events=%d)", Math.round(totalMs), Math.round(ttfe), eventCount, {
       connectionId: input.connectionId,
       sessionId: input.sessionId,
-      eventCount,
       stopReason: stopReason ?? "end_turn",
     });
+    yield timingEntry("prompt", "time_to_first_event", ttfe);
+    yield timingEntry("prompt", "total", totalMs);
     return { stopReason: stopReason ?? "end_turn" };
   }),
 
