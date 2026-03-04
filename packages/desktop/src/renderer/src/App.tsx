@@ -1,4 +1,4 @@
-import { AgentChat, SessionList } from "./features/acp";
+import { AgentChat, SessionList } from "./features/agent";
 import {
   AppLayoutActivityBar,
   AppLayoutChatPanel,
