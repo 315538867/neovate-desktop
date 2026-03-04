@@ -23,7 +23,7 @@ export function AppLayoutPrimarySidebar({ children }: { children: ReactNode }) {
       transition={isResizing ? { duration: 0 } : SPRING}
     >
       <AppLayoutPanelActivity active={!collapsed}>
-        <div className="flex h-full flex-col pt-8" style={{ width }}>
+        <div className="flex h-full flex-col overflow-y-auto pt-8" style={{ width }}>
           {children}
         </div>
       </AppLayoutPanelActivity>
