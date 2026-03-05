@@ -9,6 +9,7 @@ function createMockApp(): IRendererApp {
     subscriptions: { push: vi.fn() },
     i18nManager: {} as IRendererApp["i18nManager"],
     settings: {} as IRendererApp["settings"],
+    workbench: { contentPanel: {} as any },
   };
 }
 
@@ -101,7 +102,7 @@ describe("PluginManager", () => {
         {
           name: "has-hook",
           configContributions: () => ({
-            contentPanelViews: [{ id: "p", name: "P", component: mockContentComponent }],
+            contentPanelViews: [{ viewType: "p", name: "P", component: mockContentComponent }],
           }),
         },
       ]);
