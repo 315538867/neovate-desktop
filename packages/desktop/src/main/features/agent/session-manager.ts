@@ -17,7 +17,7 @@ import { EventPublisher } from "@orpc/server";
 import { createUIMessageStream, readUIMessageStream } from "ai";
 import debug from "debug";
 import { randomUUID } from "node:crypto";
-import { globSync } from "node:fs";
+import { globSync, statSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -207,12 +207,24 @@ export class SessionManager {
       Math.round(performance.now() - t0),
     );
 
+    // Build sessionId -> file birthtime map for accurate createdAt
+    const sessionFiles = globSync(path.join(homedir(), ".claude", "projects", "*", "*.jsonl"));
+    const birthtimeMap = new Map<string, Date>();
+    for (const file of sessionFiles) {
+      const id = path.basename(file, ".jsonl");
+      try {
+        birthtimeMap.set(id, statSync(file).birthtime);
+      } catch {
+        // ignore stat errors
+      }
+    }
+
     const result: SessionInfo[] = sessions.map((s) => ({
       sessionId: s.sessionId,
       title: s.customTitle ?? s.summary ?? s.firstPrompt?.slice(0, 50),
       cwd: s.cwd,
       updatedAt: new Date(s.lastModified).toISOString(),
-      createdAt: new Date(s.lastModified).toISOString(),
+      createdAt: (birthtimeMap.get(s.sessionId) ?? new Date(s.lastModified)).toISOString(),
     }));
 
     log("listSessions: DONE in %dms count=%d", Math.round(performance.now() - t0), result.length);
