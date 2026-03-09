@@ -52,6 +52,7 @@ export const SessionItem = memo(function SessionItem({
   const togglePinSession = useProjectStore((s) => s.togglePinSession);
   const renameSession = useAgentStore((s) => s.renameSession);
   const multiProjectSupport = useConfigStore((s) => s.multiProjectSupport);
+  const sidebarOrganize = useConfigStore((s) => s.sidebarOrganize);
 
   const [isEditing, setIsEditing] = useState(false);
   const [editingValue, setEditingValue] = useState("");
@@ -147,7 +148,9 @@ export const SessionItem = memo(function SessionItem({
                 icon={Comment01Icon}
                 size={14}
                 strokeWidth={1.5}
-                className={multiProjectSupport ? "invisible" : undefined}
+                className={
+                  multiProjectSupport && sidebarOrganize === "byProject" ? "invisible" : undefined
+                }
               />
             )}
           </div>
