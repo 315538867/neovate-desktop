@@ -24,7 +24,6 @@ interface SessionActionsMenuProps {
   trigger?: ReactElement;
   children?: ReactNode;
   onRenameStart: () => void;
-  onAfterArchive?: () => void;
 }
 
 export function SessionActionsMenu({
@@ -34,7 +33,6 @@ export function SessionActionsMenu({
   trigger,
   children,
   onRenameStart,
-  onAfterArchive,
 }: SessionActionsMenuProps) {
   const togglePinSession = useProjectStore((s) => s.togglePinSession);
   const archiveSession = useProjectStore((s) => s.archiveSession);
@@ -64,8 +62,8 @@ export function SessionActionsMenu({
   };
 
   const handleArchive = () => {
-    archiveSession(projectPath, sessionId);
-    onAfterArchive?.();
+    const isActive = useAgentStore.getState().activeSessionId === sessionId;
+    archiveSession(projectPath, sessionId, isActive);
   };
 
   if (variant === "context") {
