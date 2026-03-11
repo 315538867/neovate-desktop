@@ -20,7 +20,11 @@ import type {
   ClaudeCodeUIDispatch,
   ClaudeCodeUIDispatchResult,
 } from "../../../shared/claude-code/types";
-import type { ModelScope, SessionInfo } from "../../../shared/features/agent/types";
+import type {
+  ActiveSessionInfo,
+  ModelScope,
+  SessionInfo,
+} from "../../../shared/features/agent/types";
 import type { Provider } from "../../../shared/features/provider/types";
 import type { ConfigStore } from "../config/config-store";
 import type { ProjectStore } from "../project/project-store";
@@ -101,6 +105,14 @@ export class SessionManager {
     private configStore: ConfigStore,
     private projectStore: ProjectStore,
   ) {}
+
+  /** Return all in-memory (active) sessions. */
+  getActiveSessions(): ActiveSessionInfo[] {
+    return Array.from(this.sessions.entries()).map(([sessionId, session]) => ({
+      sessionId,
+      cwd: session.cwd,
+    }));
+  }
 
   private queryOptions({
     sessionId,

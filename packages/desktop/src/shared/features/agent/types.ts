@@ -88,3 +88,9 @@ export type SessionInfo = {
   updatedAt: string;
   createdAt: string;
 };
+
+/** Active in-memory session from SessionManager */
+export type ActiveSessionInfo = {
+  sessionId: string;
+  cwd: string;
+};

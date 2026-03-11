@@ -10,9 +10,11 @@ import type {
   ClaudeCodeUIDispatch,
   ClaudeCodeUIDispatchResult,
 } from "../../claude-code/types";
-import type { ModelScope, SessionInfo } from "./types";
+import type { ActiveSessionInfo, ModelScope, SessionInfo } from "./types";
 
 export const agentContract = {
+  activeSessions: oc.input(z.object({})).output(type<ActiveSessionInfo[]>()),
+
   listSessions: oc.input(z.object({ cwd: z.string().optional() })).output(type<SessionInfo[]>()),
 
   renameSession: oc

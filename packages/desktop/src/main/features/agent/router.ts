@@ -11,6 +11,10 @@ const agentLog = debug("neovate:agent-router");
 const os = implement({ agent: agentContract }).$context<AppContext>();
 
 export const agentRouter = os.agent.router({
+  activeSessions: os.agent.activeSessions.handler(({ context }) => {
+    return context.sessionManager.getActiveSessions();
+  }),
+
   listSessions: os.agent.listSessions.handler(async ({ input, context }) => {
     agentLog("listSessions: cwd=%s", input.cwd);
     const result = await context.sessionManager.listSessions(input.cwd);
