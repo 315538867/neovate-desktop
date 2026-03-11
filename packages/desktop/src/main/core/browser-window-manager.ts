@@ -59,16 +59,10 @@ export class BrowserWindowManager implements IBrowserWindowManager {
       return { action: "deny" };
     });
 
-    // Persist bounds before close/hide
-    win.on("close", (event) => {
+    win.on("close", () => {
       this.#store.set("bounds", win.getNormalBounds());
-      if (process.platform === "darwin") {
-        event.preventDefault();
-        win.hide();
-      }
     });
 
-    // Only fires on non-macOS (macOS close is prevented above)
     win.on("closed", () => {
       this.#mainWindow = null;
     });

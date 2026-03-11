@@ -12,6 +12,7 @@ import { getShellEnvironment } from "./features/agent/shell-env";
 import { ConfigStore } from "./features/config/config-store";
 import { ProjectStore } from "./features/project/project-store";
 import { StateStore } from "./features/state/state-store";
+import { UpdaterService } from "./features/updater/service";
 import editorPlugin from "./plugins/editor";
 import filesPlugin from "./plugins/files";
 import gitPlugin from "./plugins/git";
@@ -33,12 +34,14 @@ const stateStore = new StateStore();
 const mainApp = new MainApp({
   plugins: [gitPlugin, filesPlugin, terminalPlugin, editorPlugin],
 });
+const updaterService = new UpdaterService();
 
 const appContext: AppContext = {
   sessionManager,
   configStore,
   projectStore,
   stateStore,
+  updaterService,
   mainApp,
   storage: mainApp.getStorage(),
 };
@@ -47,6 +50,7 @@ app.whenReady().then(async () => {
   electronApp.setAppUserModelId("com.electron");
 
   await mainApp.start();
+  void updaterService.init();
 
   // Setup application menu (for menu items, shortcuts handled in renderer)
   setupApplicationMenu(mainApp.windowManager.mainWindow);
@@ -75,6 +79,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  updaterService.dispose();
   void sessionManager.closeAll();
   void mainApp.stop();
 });
