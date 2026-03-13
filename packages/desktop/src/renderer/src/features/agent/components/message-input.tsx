@@ -166,7 +166,8 @@ export function MessageInput({
     ],
     editorProps: {
       attributes: {
-        class: "tiptap min-h-[36px] max-h-[200px] overflow-y-auto px-3 py-2 text-sm outline-none",
+        class:
+          "tiptap min-h-[76px] max-h-[240px] overflow-y-auto px-3 py-2 text-sm outline-none bg-background-secondary",
       },
     },
     editable: !disabled && !streaming,
@@ -258,32 +259,48 @@ export function MessageInput({
         onChange={handleFileSelect}
       />
       <div
-        className={cn(
-          "border border-input bg-background focus-within:ring-2 focus-within:ring-ring",
-          dockAttached ? "rounded-b-lg rounded-t-[18px]" : "rounded-lg",
-        )}
+        className="rounded-[12px] shadow-[0_4px_4px_rgba(0,0,0,0.04)]"
+        style={{
+          border: "3px solid transparent",
+          background:
+            "linear-gradient(white, white) padding-box,linear-gradient(180deg,var(--color-background) 0%, color-mix(in srgb, var(--color-background) 50%, transparent) 100%) border-box",
+        }}
       >
-        {permissionMode === "plan" && (
-          <div
-            className={cn(
-              "flex items-center gap-1.5 border-b border-blue-200 bg-blue-50 px-3 py-1 text-xs text-blue-600 dark:border-blue-800/50 dark:bg-blue-950/30 dark:text-blue-400",
-              dockAttached ? "rounded-t-[18px]" : "rounded-t-lg",
-            )}
-          >
-            <span className="font-medium">Plan mode</span>
-            <span className="text-blue-500/70 dark:text-blue-400/50">Shift+Tab to exit</span>
-          </div>
-        )}
-        <EditorContent editor={editor} />
-        <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
-        <InputToolbar
-          streaming={streaming}
-          disabled={disabled}
-          onSend={send}
-          onCancel={onCancel}
-          onAttach={() => fileInputRef.current?.click()}
-          activeSessionId={activeSessionId}
-        />
+        <div
+          className={cn(
+            "border border-input focus-within:border-primary overflow-hidden",
+            dockAttached ? "rounded-b-lg rounded-t-[18px]" : "rounded-lg",
+          )}
+          style={{
+            border: "2px solid transparent",
+            backgroundColor: "var(--background)",
+            color: "var(--foreground)",
+            background:
+              "linear-gradient(white, white) padding-box,linear-gradient(0deg,color-mix(in srgb, var(--primary) 50%, transparent) 0,transparent 80%,transparent)border-box",
+          }}
+        >
+          {permissionMode === "plan" && (
+            <div
+              className={cn(
+                "flex items-center gap-1.5 border-b border-blue-200 bg-blue-50 px-3 py-1 text-xs text-blue-600 dark:border-blue-800/50 dark:bg-blue-950/30 dark:text-blue-400",
+                dockAttached ? "rounded-t-[18px]" : "rounded-t-lg",
+              )}
+            >
+              <span className="font-medium">Plan mode</span>
+              <span className="text-blue-500/70 dark:text-blue-400/50">Shift+Tab to exit</span>
+            </div>
+          )}
+          <EditorContent editor={editor} />
+          <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
+          <InputToolbar
+            streaming={streaming}
+            disabled={disabled}
+            onSend={send}
+            onCancel={onCancel}
+            onAttach={() => fileInputRef.current?.click()}
+            activeSessionId={activeSessionId}
+          />
+        </div>
       </div>
     </div>
   );
