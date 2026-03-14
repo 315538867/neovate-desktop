@@ -1,7 +1,11 @@
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
+import type { BundledLanguage } from "shiki";
 import type { Components, ExtraProps } from "streamdown";
 
+import { Children, isValidElement } from "react";
+
 import { cn } from "../../lib/utils";
+import { CodeBlock } from "./code-block";
 
 type MarkdownAnchorProps = ComponentProps<"a"> & ExtraProps;
 type MarkdownBlockquoteProps = ComponentProps<"blockquote"> & ExtraProps;
@@ -13,6 +17,29 @@ type MarkdownTableProps = ComponentProps<"table"> & ExtraProps;
 
 const isBlockCode = (className?: string) =>
   className?.split(" ").some((token) => token.startsWith("language-")) ?? false;
+
+const extractLanguage = (className?: string): BundledLanguage | null => {
+  if (!className) return null;
+  const langClass = className.split(" ").find((token) => token.startsWith("language-"));
+  if (!langClass) return null;
+  const lang = langClass.replace("language-", "");
+  // Return as BundledLanguage, shiki will fallback to "text" if not supported
+  return lang as BundledLanguage;
+};
+
+const extractCodeContent = (children: ReactNode): string => {
+  if (typeof children === "string") return children;
+  if (Array.isArray(children)) {
+    return children.map(extractCodeContent).join("");
+  }
+  if (isValidElement(children)) {
+    const props = children.props as { children?: ReactNode };
+    if (props.children) {
+      return extractCodeContent(props.children);
+    }
+  }
+  return "";
+};
 
 function MarkdownLink({ className, children, ...props }: MarkdownAnchorProps) {
   return (
@@ -26,26 +53,62 @@ function MarkdownLink({ className, children, ...props }: MarkdownAnchorProps) {
 }
 
 function MarkdownInlineCode({ className, children, ...props }: MarkdownCodeProps) {
-  if (isBlockCode(className)) {
+  const codeContent = typeof children === "string" ? children : extractCodeContent(children);
+
+  // Block code is handled by MarkdownPre, so just render a plain code element here
+  if (!isBlockCode(className)) {
     return (
-      <code className={className} {...props}>
+      <code
+        className={cn(
+          "inline-block rounded-md border bg-background px-2 py-0.5 text-xs align-middle",
+          className,
+        )}
+        {...props}
+      >
         {children}
       </code>
     );
   }
 
+  // Inline code rendering with syntax highlighting
+  const language = extractLanguage(className) ?? ("text" as BundledLanguage);
+
   return (
-    <code className={cn("rounded-sm bg-muted px-1 py-0.5 font-mono text-xs", className)} {...props}>
-      {children}
-    </code>
+    <CodeBlock
+      className={cn(
+        "inline-block rounded-md border bg-background px-2 py-0.5 text-xs align-middle",
+        className,
+      )}
+      code={codeContent}
+      language={language}
+    />
   );
 }
 
-function MarkdownPre({ className, children, ...props }: MarkdownPreProps) {
+function MarkdownPre({ className, children }: MarkdownPreProps) {
+  // Extract code content and language from children
+  const codeElement = Children.toArray(children).find(
+    (child) => isValidElement(child) && child.type === "code",
+  );
+
+  if (isValidElement(codeElement)) {
+    const codeProps = codeElement.props as { className?: string; children?: ReactNode };
+    const codeClassName = codeProps.className;
+    const language = extractLanguage(codeClassName) ?? ("text" as BundledLanguage);
+    const codeContent = extractCodeContent(codeProps.children);
+
+    return (
+      <CodeBlock
+        className={cn("my-4 first:mt-0 last:mb-0", className)}
+        code={codeContent}
+        language={language}
+      />
+    );
+  }
+
+  // Fallback for non-code pre elements
   return (
-    <pre className={cn("my-4 overflow-x-auto first:mt-0 last:mb-0", className)} {...props}>
-      {children}
-    </pre>
+    <pre className={cn("my-4 overflow-x-auto first:mt-0 last:mb-0", className)}>{children}</pre>
   );
 }
 
