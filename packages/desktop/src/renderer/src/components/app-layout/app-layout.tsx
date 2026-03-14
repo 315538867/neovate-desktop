@@ -30,6 +30,7 @@ import { useProjectStore } from "../../features/project/store";
 import { useSettingsStore } from "../../features/settings";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
+import { Separator } from "../ui/separator";
 import {
   APP_LAYOUT_COLLAPSED_TITLEBAR_LEFT_MARGIN,
   APP_LAYOUT_GRID,
@@ -229,6 +230,7 @@ export function AppLayoutSecondaryTitleBar() {
             </Suspense>
           );
         })}
+        <Separator orientation="vertical" className="mx-2 my-1 w-[2px] rounded-xl" />
         <ContentPanelToggle />
         <Button
           variant="ghost"
