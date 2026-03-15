@@ -129,7 +129,7 @@ export function OpenAppButton({ cwd }: OpenAppButtonProps) {
       <Button
         variant="outline"
         size="sm"
-        className="h-7 rounded-r-none border-r-0 px-2"
+        className="h-7 rounded-r-none before:rounded-r-none border-r-0 px-2"
         onClick={handleLeftClick}
         disabled={!effectiveDefault}
       >
@@ -142,7 +142,11 @@ export function OpenAppButton({ cwd }: OpenAppButtonProps) {
       <DropdownMenu onOpenChange={handleOpenChange}>
         <DropdownMenuTrigger
           render={
-            <Button variant="outline" size="sm" className="h-7 rounded-l-none px-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 rounded-l-none before:rounded-l-none px-1"
+            >
               <ChevronDown className="size-3.5" />
             </Button>
           }
