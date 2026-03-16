@@ -99,13 +99,16 @@ export class SkillsService {
     if (forceRefresh) this.registryCache = null;
 
     const registry = await this.fetchRegistry();
+    log("recommended: registry returned %d items", registry.length);
     const installed = await this.list("all");
     const installedNames = new Set(installed.map((s) => s.name));
 
-    return registry.map((skill) => ({
+    const result = registry.map((skill) => ({
       ...skill,
       installed: installedNames.has(skill.skillName),
     }));
+    log("recommended: returning %d items", result.length);
+    return result;
   }
 
   async preview(source: string): Promise<{ previewId: string; skills: PreviewSkill[] }> {
@@ -249,8 +252,11 @@ export class SkillsService {
     }
 
     const urls = this.configStore.get("skillsRegistryUrls");
-    log("fetchRegistry fetching", { urlCount: urls?.length ?? 0 });
-    if (!urls || urls.length === 0) return [];
+    log("fetchRegistry urls=%o", urls);
+    if (!urls || urls.length === 0) {
+      log("fetchRegistry: no registry URLs configured, returning empty");
+      return [];
+    }
 
     const results = await Promise.allSettled(urls.map((url) => this.fetchSingleRegistry(url)));
 
