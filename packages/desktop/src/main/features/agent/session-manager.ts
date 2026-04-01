@@ -29,6 +29,9 @@ import type {
   RewindFilesResult,
   SessionInfo,
 } from "../../../shared/features/agent/types";
+import type { Contributions } from "../../core/plugin/contributions";
+
+import { mergeAgentHooks } from "../../core/plugin/contributions";
 
 const execFileAsync = promisify(execFile);
 import type { Provider } from "../../../shared/features/provider/types";
@@ -126,6 +129,7 @@ export class SessionManager {
     private projectStore: ProjectStore,
     private requestTracker: RequestTracker,
     private powerBlocker: PowerBlockerService,
+    private getAgentContributions: () => Contributions["agents"] = () => [],
   ) {}
 
   /** Return all in-memory (active) sessions. */
@@ -506,6 +510,12 @@ export class SessionManager {
       cwd,
       model: opts?.model,
     });
+    // Merge plugin-contributed hooks with built-in hooks (RTK)
+    const mergedHooks = mergeAgentHooks(this.getAgentContributions());
+    if (registerRtkHook) {
+      (mergedHooks.PreToolUse ??= []).push({ matcher: "Bash", hooks: [rtkHook] });
+    }
+
     const options: Options = {
       ...queryOpts,
       allowDangerouslySkipPermissions: true,
@@ -514,9 +524,7 @@ export class SessionManager {
         ...(settingsEnv ? { env: settingsEnv } : {}),
         ...(agentLanguage !== "English" ? { language: agentLanguage.toLowerCase() } : {}),
       },
-      ...(registerRtkHook
-        ? { hooks: { PreToolUse: [{ matcher: "Bash", hooks: [rtkHook] }] } }
-        : {}),
+      hooks: mergedHooks,
       ...(opts?.resume ? { resume: opts.resume, sessionId: undefined } : {}),
       ...(networkInspector
         ? {
