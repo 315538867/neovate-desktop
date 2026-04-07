@@ -18,6 +18,7 @@ import type { ConfigStore } from "../config/config-store";
 import type { ProjectStore } from "../project/project-store";
 import type { RemoteControlPlatformAdapter } from "./platforms/types";
 
+import { APP_NAME } from "../../../shared/constants";
 import { CommandHandler } from "./command-handler";
 import { LinkStore } from "./link-store";
 import { PlatformAdapterRegistry } from "./platforms/registry";
@@ -92,7 +93,7 @@ export class RemoteControlService {
       const adapter = this.registry.get(link.ref.platformId);
       if (adapter?.isRunning()) {
         try {
-          await adapter.sendMessage({ ref: link.ref, text: "Neovate going offline." });
+          await adapter.sendMessage({ ref: link.ref, text: `${APP_NAME} going offline.` });
         } catch {
           // Best effort
         }
@@ -560,7 +561,7 @@ export class RemoteControlService {
       if (isActive) {
         this.bridge.subscribeSession(link.sessionId, link.ref, adapter);
         void adapter
-          .sendMessage({ ref: link.ref, text: "Neovate back online. Session reconnected." })
+          .sendMessage({ ref: link.ref, text: `${APP_NAME} back online. Session reconnected.` })
           .catch(() => {});
         log("restored link: %s -> %s", link.ref.chatId, link.sessionId);
       } else {
