@@ -131,7 +131,7 @@ export const SkillDiscoverTab = ({
     );
   }
 
-  const renderSkillCard = (skill: RecommendedSkill) => {
+  const renderSkillItem = (skill: RecommendedSkill, index: number, array: RecommendedSkill[]) => {
     const initials = getInitials(skill.name);
     const isInstalling = installingRef === skill.sourceRef;
     const isDeprecated = skill.badges?.includes("deprecated") ?? false;
@@ -139,11 +139,15 @@ export const SkillDiscoverTab = ({
       ?.slice()
       .sort((a, b) => skillBadgeRenderPriority[a] - skillBadgeRenderPriority[b])
       .slice(0, 2);
+    const isFirst = index === 0;
+    const isLast = index === array.length - 1;
     return (
       <div
         key={skill.sourceRef}
         className={cn(
-          "group relative flex flex-col p-4 rounded-xl bg-card/80 border border-border/40 cursor-pointer hover:bg-card hover:border-border/60 hover:shadow-sm transition-colors duration-200",
+          "group relative flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors duration-150",
+          isFirst && "rounded-t-xl",
+          isLast && "rounded-b-xl",
           skill.installed && "opacity-60",
           isDeprecated && !skill.installed && "opacity-60",
         )}
@@ -156,51 +160,51 @@ export const SkillDiscoverTab = ({
           }
         }}
       >
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex items-center justify-center size-10 rounded-lg bg-muted text-muted-foreground text-sm font-semibold shrink-0">
-            {initials}
+        <div className="flex items-center justify-center size-8 rounded-md bg-muted text-muted-foreground text-xs font-semibold shrink-0">
+          {initials}
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-medium text-foreground truncate">{skill.name}</h3>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Badge variant="outline" size="sm">
+                {skill.source}
+              </Badge>
+              {skill.version && (
+                <Badge variant="secondary" size="sm">
+                  v{skill.version}
+                </Badge>
+              )}
+              {sortedBadges?.map((badge) => (
+                <Badge key={badge} variant={skillBadgeVariantMap[badge]} size="sm">
+                  {t(`settings.skills.badge.${badge}`)}
+                </Badge>
+              ))}
+              {skill.installed && (
+                <Badge variant="success" size="sm">
+                  {t("settings.skills.installedBadge")}
+                </Badge>
+              )}
+            </div>
           </div>
-          {skill.installed ? (
-            <Badge variant="secondary" size="sm">
-              {t("settings.skills.installedBadge")}
-            </Badge>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
-              disabled={installingRef !== null}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleInstallRecommended(skill, "global");
-              }}
-            >
-              {isInstalling ? <Spinner className="size-3.5" /> : <Download className="size-3.5" />}
-            </Button>
-          )}
+          <p className="text-xs text-muted-foreground truncate mt-0.5">{skill.description}</p>
         </div>
 
-        <h3 className="text-sm font-medium text-foreground truncate mb-1">{skill.name}</h3>
-
-        <p className="text-xs text-muted-foreground line-clamp-2 mb-3 min-h-8">
-          {skill.description}
-        </p>
-
-        <div className="flex flex-wrap items-center gap-1.5 mt-auto">
-          <Badge variant="outline" size="sm">
-            {skill.source}
-          </Badge>
-          {skill.version && (
-            <Badge variant="secondary" size="sm">
-              v{skill.version}
-            </Badge>
-          )}
-          {sortedBadges?.map((badge) => (
-            <Badge key={badge} variant={skillBadgeVariantMap[badge]} size="sm">
-              {t(`settings.skills.badge.${badge}`)}
-            </Badge>
-          ))}
-        </div>
+        {!skill.installed && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150 shrink-0"
+            disabled={installingRef !== null}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleInstallRecommended(skill, "global");
+            }}
+          >
+            {isInstalling ? <Spinner className="size-3.5" /> : <Download className="size-3.5" />}
+          </Button>
+        )}
       </div>
     );
   };
@@ -219,7 +223,9 @@ export const SkillDiscoverTab = ({
               </div>
             )}
 
-            <div className="grid grid-cols-3 gap-3">{group.skills.map(renderSkillCard)}</div>
+            <div className="rounded-xl bg-card border border-border/50 divide-y divide-border/50">
+              {group.skills.map(renderSkillItem)}
+            </div>
 
             {group.url && (
               <div className="mt-3 text-center">

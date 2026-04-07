@@ -150,55 +150,56 @@ export const SkillInstalledTab = ({
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl bg-card border border-border/50 divide-y divide-border/50">
           {filteredSkills.map((skill) => {
             const initials = getInitials(skill.name);
             const update = getUpdate(skill);
             return (
               <div
                 key={`${skill.scope}-${skill.projectPath ?? ""}-${skill.dirName}`}
-                className="group relative flex flex-col p-4 rounded-xl bg-card/80 border border-border/40 cursor-pointer hover:bg-card hover:border-border/60 hover:shadow-sm transition-colors duration-200"
+                className="group relative flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors duration-150 first:rounded-t-xl last:rounded-b-xl"
                 onClick={() => setSelectedSkill(skill)}
               >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center justify-center size-10 rounded-lg bg-muted text-muted-foreground text-sm font-semibold shrink-0">
-                    {initials}
-                  </div>
-                  <div onClick={(e) => e.stopPropagation()}>
-                    <Switch
-                      checked={skill.enabled}
-                      disabled={togglingSkill !== null}
-                      onCheckedChange={() => handleToggleEnabled(skill)}
-                    />
-                  </div>
+                <div className="flex items-center justify-center size-8 rounded-md bg-muted text-muted-foreground text-xs font-semibold shrink-0">
+                  {initials}
                 </div>
 
-                <h3 className="text-sm font-medium text-foreground truncate mb-1">{skill.name}</h3>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-medium text-foreground truncate">{skill.name}</h3>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {showScopeBadge && (
+                        <Badge variant="outline" size="sm">
+                          {skill.scope === "global"
+                            ? t("settings.skills.scopeGlobal")
+                            : (skill.projectPath?.split("/").pop() ??
+                              t("settings.skills.scopeProject"))}
+                        </Badge>
+                      )}
+                      {skill.version && (
+                        <Badge variant="secondary" size="sm">
+                          v{skill.version}
+                        </Badge>
+                      )}
+                      {update && (
+                        <Badge variant="default" size="sm" className="gap-1">
+                          <ArrowUpCircle className="size-3" />
+                          {update.latestVersion}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">
+                    {skill.description || t("settings.skills.noDescription")}
+                  </p>
+                </div>
 
-                <p className="text-xs text-muted-foreground line-clamp-2 mb-3 min-h-8">
-                  {skill.description || t("settings.skills.noDescription")}
-                </p>
-
-                <div className="flex flex-wrap items-center gap-1.5 mt-auto">
-                  {showScopeBadge && (
-                    <Badge variant="outline" size="sm">
-                      {skill.scope === "global"
-                        ? t("settings.skills.scopeGlobal")
-                        : (skill.projectPath?.split("/").pop() ??
-                          t("settings.skills.scopeProject"))}
-                    </Badge>
-                  )}
-                  {skill.version && (
-                    <Badge variant="secondary" size="sm">
-                      v{skill.version}
-                    </Badge>
-                  )}
-                  {update && (
-                    <Badge variant="default" size="sm" className="gap-1">
-                      <ArrowUpCircle className="size-3" />
-                      {update.latestVersion}
-                    </Badge>
-                  )}
+                <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+                  <Switch
+                    checked={skill.enabled}
+                    disabled={togglingSkill !== null}
+                    onCheckedChange={() => handleToggleEnabled(skill)}
+                  />
                 </div>
               </div>
             );

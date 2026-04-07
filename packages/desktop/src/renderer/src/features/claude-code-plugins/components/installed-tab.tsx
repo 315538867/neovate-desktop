@@ -93,7 +93,7 @@ export const InstalledTab = ({ plugins, updates, projects, onRefresh }: Installe
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="rounded-xl bg-card border border-border/50 divide-y divide-border/50">
         {plugins.map((plugin) => {
           const key = `${plugin.pluginId}-${plugin.scope}`;
           const initials = getInitials(plugin.name);
@@ -101,45 +101,46 @@ export const InstalledTab = ({ plugins, updates, projects, onRefresh }: Installe
           return (
             <div
               key={key}
-              className="group relative flex flex-col p-4 rounded-xl bg-card/80 border border-border/40 cursor-pointer hover:bg-card hover:border-border/60 hover:shadow-sm transition-colors duration-200"
+              className="group relative flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors duration-150 first:rounded-t-xl last:rounded-b-xl"
               onClick={() => setSelectedPlugin(plugin)}
             >
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center justify-center size-10 rounded-lg bg-muted text-muted-foreground text-sm font-semibold shrink-0">
-                  {initials}
-                </div>
-                <div onClick={(e) => e.stopPropagation()}>
-                  <Switch
-                    checked={plugin.enabled}
-                    disabled={togglingId !== null}
-                    onCheckedChange={() => handleToggle(plugin)}
-                  />
-                </div>
+              <div className="flex items-center justify-center size-8 rounded-md bg-muted text-muted-foreground text-xs font-semibold shrink-0">
+                {initials}
               </div>
 
-              <h3 className="text-sm font-medium text-foreground truncate mb-1">{plugin.name}</h3>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-medium text-foreground truncate">{plugin.name}</h3>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Badge variant="outline" size="sm">
+                      {plugin.scope === "user"
+                        ? t("settings.plugins.user")
+                        : `${plugin.scope}: ${plugin.projectPath?.split("/").pop() ?? t("settings.plugins.unknown")}`}
+                    </Badge>
+                    {plugin.version && (
+                      <Badge variant="secondary" size="sm">
+                        v{plugin.version}
+                      </Badge>
+                    )}
+                    {update && (
+                      <Badge variant="default" size="sm" className="gap-1">
+                        <ArrowUpCircle className="size-3" />
+                        {t("settings.plugins.update")}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground truncate mt-0.5">
+                  {plugin.description || t("settings.plugins.noDescription")}
+                </p>
+              </div>
 
-              <p className="text-xs text-muted-foreground line-clamp-2 mb-3 min-h-8">
-                {plugin.description || t("settings.plugins.noDescription")}
-              </p>
-
-              <div className="flex flex-wrap items-center gap-1.5 mt-auto">
-                <Badge variant="outline" size="sm">
-                  {plugin.scope === "user"
-                    ? t("settings.plugins.user")
-                    : `${plugin.scope}: ${plugin.projectPath?.split("/").pop() ?? t("settings.plugins.unknown")}`}
-                </Badge>
-                {plugin.version && (
-                  <Badge variant="secondary" size="sm">
-                    v{plugin.version}
-                  </Badge>
-                )}
-                {update && (
-                  <Badge variant="default" size="sm" className="gap-1">
-                    <ArrowUpCircle className="size-3" />
-                    {t("settings.plugins.update")}
-                  </Badge>
-                )}
+              <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+                <Switch
+                  checked={plugin.enabled}
+                  disabled={togglingId !== null}
+                  onCheckedChange={() => handleToggle(plugin)}
+                />
               </div>
             </div>
           );
