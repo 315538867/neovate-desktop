@@ -25,6 +25,7 @@ import { RemoteControlService } from "./features/remote-control/remote-control-s
 import { SkillsService } from "./features/skills/skills-service";
 import { StateStore } from "./features/state/state-store";
 import { UpdaterService } from "./features/updater/service";
+import browserPlugin from "./plugins/browser";
 import changesPlugin from "./plugins/changes";
 // import demoMcpLivePreviewPlugin from "./plugins/demo-mcp-live-preview";
 import editorPlugin from "./plugins/editor";
@@ -98,6 +99,7 @@ const mainApp = new MainApp({
     terminalPlugin,
     editorPlugin,
     changesPlugin,
+    browserPlugin,
     // demoMcpLivePreviewPlugin,
   ],
   llmService,
