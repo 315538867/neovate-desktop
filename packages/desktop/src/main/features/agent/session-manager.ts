@@ -550,14 +550,10 @@ export class SessionManager {
       sessionId,
     );
 
-    // Network inspector: conditionally inject fetch interceptor via --preload
-    // Not supported with standalone binaries (--preload is a bun flag)
-    const networkInspector =
-      this.configStore.get("networkInspector") === true && !resolved.standalone;
-    if (resolved.standalone && this.configStore.get("networkInspector") === true) {
-      log("initSession: network inspector skipped (standalone binary)");
-    }
-    if (networkInspector) {
+    // Network inspector UI is controlled by networkInspector setting,
+    // but we always inject the interceptor to collect usage stats
+    const networkInspectorUI = this.configStore.get("networkInspector") === true;
+    if (networkInspectorUI) {
       this.requestTracker.markInspectorEnabled(sessionId);
     }
 
@@ -580,7 +576,7 @@ export class SessionManager {
 
     // Build spawnClaudeCodeProcess override:
     // - Standalone binary: spawn the binary directly
-    // - Network inspector (non-standalone only): inject --preload for fetch interception
+    // - Non-standalone: always inject --preload for fetch interception (stats + network inspector)
     let spawnOverride:
       | ((spawnOpts: import("@anthropic-ai/claude-agent-sdk").SpawnOptions) => SpawnedProcess)
       | undefined;
@@ -593,7 +589,7 @@ export class SessionManager {
           signal: spawnOpts.signal,
           stdio: ["pipe", "pipe", "pipe"],
         }) as unknown as SpawnedProcess;
-    } else if (networkInspector) {
+    } else {
       spawnOverride = (spawnOpts) => {
         const interceptorPath = resolveInterceptorPath();
         log("spawnClaudeCodeProcess: interceptor=%s sessionId=%s", interceptorPath, sessionId);

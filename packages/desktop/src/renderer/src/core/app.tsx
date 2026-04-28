@@ -47,6 +47,7 @@ import networkPlugin from "../plugins/network";
 import popupWindowPlugin from "../plugins/popup-window";
 import { providersPlugin } from "../plugins/providers";
 import searchPlugin from "../plugins/search";
+import statsPlugin from "../plugins/stats";
 import terminalPlugin from "../plugins/terminal";
 import { startDeeplinkSubscription } from "./deeplink/subscription";
 import { DisposableStore } from "./disposable";
@@ -202,6 +203,7 @@ const BUILTIN_PLUGINS: RendererPlugin[] = [
   editorPlugin,
   changesPlugin,
   networkPlugin,
+  statsPlugin,
   debugPlugin,
   // demoMcpLivePreviewPlugin,
   providersPlugin,

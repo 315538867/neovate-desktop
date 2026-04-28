@@ -1,0 +1,255 @@
+{
+  "timestamp": "2026-04-28T14:56:13+08:00",
+  "project": "neovate-desktop",
+  "version": "0.1.2",
+  "scan_version": "v2",
+  "scan_mode": "adaptive_full",
+  "phases_completed": ["A", "B", "C"],
+  "repo_root": "/Volumes/code/neovate-desktop",
+  "package_root": "packages/desktop",
+  "ignore_rules_source": ".gitignore",
+  "ignore_patterns": [
+    "node_modules/**",
+    ".git/**",
+    ".github/**",
+    "dist/**",
+    "out/**",
+    "release/**",
+    ".DS_Store",
+    ".eslintcache",
+    ".cache",
+    "*.log*",
+    "*.tsbuildinfo",
+    "test-results/**",
+    "playwright-report/**",
+    "docs/plans",
+    ".claude/settings.local.json",
+    "packages/desktop/vendor/bun/**",
+    "packages/desktop/vendor/rtk/**",
+    ".worktrees/**",
+    ".firecrawl/**",
+    "/tmp"
+  ],
+  "modules": [
+    {
+      "name": "main",
+      "path": "packages/desktop/src/main",
+      "language": "typescript",
+      "entry": "packages/desktop/src/main/index.ts",
+      "description": "Electron 主进程 (Node.js)：应用生命周期、oRPC IPC 服务器、ACP 子进程管理、插件系统",
+      "interfaces": {
+        "orpc_routers": [
+          "packages/desktop/src/main/router.ts",
+          "packages/desktop/src/main/features/agent/router.ts",
+          "packages/desktop/src/main/features/config/router.ts",
+          "packages/desktop/src/main/features/deeplink/router.ts",
+          "packages/desktop/src/main/features/electron/router.ts",
+          "packages/desktop/src/main/features/llm/router.ts",
+          "packages/desktop/src/main/features/project/router.ts",
+          "packages/desktop/src/main/features/provider/router.ts",
+          "packages/desktop/src/main/features/remote-control/router.ts",
+          "packages/desktop/src/main/features/rules/router.ts",
+          "packages/desktop/src/main/features/skills/router.ts",
+          "packages/desktop/src/main/features/state/router.ts",
+          "packages/desktop/src/main/features/storage/router.ts",
+          "packages/desktop/src/main/features/updater/router.ts",
+          "packages/desktop/src/main/features/utils/router.ts",
+          "packages/desktop/src/main/features/claude-code-plugins/router.ts",
+          "packages/desktop/src/main/plugins/git/router.ts",
+          "packages/desktop/src/main/plugins/changes/router.ts",
+          "packages/desktop/src/main/plugins/editor/router.ts",
+          "packages/desktop/src/main/plugins/files/router.ts",
+          "packages/desktop/src/main/plugins/terminal/router.ts",
+          "packages/desktop/src/main/plugins/browser/router.ts",
+          "packages/desktop/src/main/plugins/demo-mcp-live-preview/router.ts"
+        ],
+        "core_services": [
+          "packages/desktop/src/main/core/storage-service.ts",
+          "packages/desktop/src/main/core/browser-window-manager.ts",
+          "packages/desktop/src/main/core/deeplink/deeplink-service.ts",
+          "packages/desktop/src/main/core/plugin/plugin-manager.ts",
+          "packages/desktop/src/main/core/shell-service.ts",
+          "packages/desktop/src/main/core/menu.ts",
+          "packages/desktop/src/main/core/power-blocker-service.ts"
+        ]
+      },
+      "tests": {
+        "framework": "vitest",
+        "location": "colocated __tests__/",
+        "key_files": [
+          "packages/desktop/src/main/__tests__/app.test.ts",
+          "packages/desktop/src/main/__tests__/router.test.ts",
+          "packages/desktop/src/main/core/__tests__/browser-window-manager.test.ts",
+          "packages/desktop/src/main/core/__tests__/storage-service.test.ts",
+          "packages/desktop/src/main/core/__tests__/storage-service.integration.test.ts",
+          "packages/desktop/src/main/features/agent/__tests__/session-manager.test.ts",
+          "packages/desktop/src/main/features/agent/__tests__/router.test.ts"
+        ]
+      },
+      "config_files": [
+        "packages/desktop/electron.vite.config.ts",
+        "packages/desktop/tsconfig.node.json"
+      ],
+      "coverage": {
+        "interfaces_scanned": true,
+        "tests_scanned": true,
+        "data_models_scanned": true,
+        "dependencies_scanned": true,
+        "gaps": ["agent interceptor 单元测试缺失", "remote-control 平台适配器测试缺失"]
+      }
+    },
+    {
+      "name": "renderer",
+      "path": "packages/desktop/src/renderer/src",
+      "language": "typescript+tsx",
+      "entry": "packages/desktop/src/renderer/src/main.tsx",
+      "description": "React 19 SPA 渲染进程：全部 UI（聊天、会话列表、设置、内容面板）",
+      "interfaces": {
+        "orpc_client": "packages/desktop/src/renderer/src/orpc.ts",
+        "stores": [
+          "packages/desktop/src/renderer/src/features/agent/store.ts",
+          "packages/desktop/src/renderer/src/features/config/store.ts",
+          "packages/desktop/src/renderer/src/features/project/store.ts",
+          "packages/desktop/src/renderer/src/features/content-panel/store.ts",
+          "packages/desktop/src/renderer/src/features/command-palette/store.ts",
+          "packages/desktop/src/renderer/src/features/provider/store.ts",
+          "packages/desktop/src/renderer/src/features/settings/store.ts",
+          "packages/desktop/src/renderer/src/components/app-layout/store.ts"
+        ],
+        "core_components": [
+          "packages/desktop/src/renderer/src/core/app.tsx",
+          "packages/desktop/src/renderer/src/core/plugin/plugin-manager.ts",
+          "packages/desktop/src/renderer/src/core/workbench/layout/service.ts",
+          "packages/desktop/src/renderer/src/core/i18n/manager.ts"
+        ]
+      },
+      "tests": {
+        "framework": "vitest (jsdom)",
+        "location": "colocated __tests__/",
+        "key_files": [
+          "packages/desktop/src/renderer/src/core/__tests__/app.test.ts",
+          "packages/desktop/src/renderer/src/features/agent/__tests__/store.test.ts",
+          "packages/desktop/src/renderer/src/features/agent/__tests__/process-ui-message-stream.test.ts",
+          "packages/desktop/src/renderer/src/features/agent/components/__tests__/message-parts.test.tsx",
+          "packages/desktop/src/renderer/src/features/content-panel/__tests__/content-panel.test.ts"
+        ]
+      },
+      "config_files": [
+        "packages/desktop/electron.vite.config.ts",
+        "packages/desktop/tsconfig.web.json",
+        "packages/desktop/components.json"
+      ],
+      "coverage": {
+        "interfaces_scanned": true,
+        "tests_scanned": true,
+        "data_models_scanned": true,
+        "dependencies_scanned": true,
+        "gaps": [
+          "app-layout 集成测试覆盖偏低",
+          "plugins/ 下部分插件缺少独立测试",
+          "tool-parts 大部分组件无独立测试"
+        ]
+      }
+    },
+    {
+      "name": "preload",
+      "path": "packages/desktop/src/preload",
+      "language": "typescript",
+      "entry": "packages/desktop/src/preload/index.ts",
+      "description": "Electron preload 脚本：context bridge + MessagePort 转发",
+      "interfaces": {
+        "context_bridge": "packages/desktop/src/preload/index.ts"
+      },
+      "tests": {
+        "framework": "none",
+        "location": "N/A",
+        "key_files": []
+      },
+      "config_files": [
+        "packages/desktop/electron.vite.config.ts"
+      ],
+      "coverage": {
+        "interfaces_scanned": true,
+        "tests_scanned": false,
+        "data_models_scanned": true,
+        "dependencies_scanned": true,
+        "gaps": ["无测试文件", "类型声明覆盖偏弱"]
+      }
+    },
+    {
+      "name": "shared",
+      "path": "packages/desktop/src/shared",
+      "language": "typescript",
+      "entry": "packages/desktop/src/shared/contract.ts",
+      "description": "共享代码：oRPC 契约 + Zod schema + Claude Code 工具解析器",
+      "interfaces": {
+        "root_contract": "packages/desktop/src/shared/contract.ts",
+        "feature_contracts": [
+          "packages/desktop/src/shared/features/agent/contract.ts",
+          "packages/desktop/src/shared/features/config/contract.ts",
+          "packages/desktop/src/shared/features/llm/contract.ts",
+          "packages/desktop/src/shared/features/project/contract.ts",
+          "packages/desktop/src/shared/features/provider/contract.ts",
+          "packages/desktop/src/shared/features/remote-control/contract.ts",
+          "packages/desktop/src/shared/features/rules/contract.ts",
+          "packages/desktop/src/shared/features/skills/contract.ts",
+          "packages/desktop/src/shared/features/state/contract.ts",
+          "packages/desktop/src/shared/features/storage/contract.ts",
+          "packages/desktop/src/shared/features/updater/contract.ts",
+          "packages/desktop/src/shared/features/utils/contract.ts",
+          "packages/desktop/src/shared/features/agent/contract.ts",
+          "packages/desktop/src/shared/features/claude-code-plugins/contract.ts",
+          "packages/desktop/src/shared/features/deeplink/contract.ts",
+          "packages/desktop/src/shared/features/electron/contract.ts"
+        ],
+        "tool_parsers": "packages/desktop/src/shared/claude-code/tools/ (21 tools)"
+      },
+      "tests": {
+        "framework": "vitest",
+        "location": "colocated __tests__/",
+        "key_files": [
+          "packages/desktop/src/shared/__tests__/i18n.test.ts",
+          "packages/desktop/src/shared/claude-code/tools/__tests__/ask-user-question.test.ts"
+        ]
+      },
+      "config_files": [],
+      "coverage": {
+        "interfaces_scanned": true,
+        "tests_scanned": true,
+        "data_models_scanned": true,
+        "dependencies_scanned": true,
+        "gaps": [
+          "大部分 feature contract 无独立测试",
+          "claude-code tools 中仅 ask-user-question 有测试",
+          "platform.ts 无测试"
+        ]
+      }
+    }
+  ],
+  "coverage": {
+    "estimated_total_files": 300,
+    "scanned_files": 280,
+    "coverage_percentage": 93,
+    "truncated": false,
+    "truncation_reason": null,
+    "summary": {
+      "main": "入口/路由/核心服务/大多数 feature 已扫描。agent interceptor 和 remote-control 平台适配器测试缺口。",
+      "renderer": "核心/agent 模块/组件库/布局已扫描。tool-parts 组件和部分插件测试缺口。",
+      "preload": "已完全扫描。无测试文件，为已知缺口。",
+      "shared": "所有 contract 和工具解析器已扫描。大多数 contract 和工具无独立测试。"
+    }
+  },
+  "next_steps": [
+    "优先补扫: packages/desktop/src/main/features/remote-control/platforms/ (平台适配器测试)",
+    "建议补扫: packages/desktop/src/renderer/src/features/agent/components/tool-parts/ (工具渲染组件测试)",
+    "建议补扫: packages/desktop/src/shared/claude-code/tools/ (工具解析器独立测试)",
+    "可选: 评估 preload 是否需要测试 (通常不需要，但仍可考虑集成测试)"
+  ],
+  "docs_generated": [
+    "CLAUDE.md (根级, 更新)",
+    "packages/desktop/src/main/CLAUDE.md (更新)",
+    "packages/desktop/src/renderer/CLAUDE.md (更新)",
+    "packages/desktop/src/shared/CLAUDE.md (更新)",
+    "packages/desktop/src/preload/CLAUDE.md (新建)"
+  ]
+}

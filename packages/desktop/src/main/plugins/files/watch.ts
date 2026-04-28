@@ -11,7 +11,6 @@ const log = debug("neovate:files:watch");
 const MAX_WATCHED_DIRS = 100;
 
 const IGNORED_PATTERNS = [
-  /(^|[\\])\../, // hidden files
   /node_modules/,
   "**/package-lock.json",
   "**/yarn.lock",

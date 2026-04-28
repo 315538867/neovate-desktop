@@ -28,6 +28,7 @@ import { providerRouter } from "./features/provider/router";
 import { remoteControlRouter } from "./features/remote-control/router";
 import { rulesRouter } from "./features/rules/router";
 import { skillsRouter } from "./features/skills/router";
+import { statsRouter } from "./features/stats/router";
 import { storageRouter } from "./features/storage/router";
 import { updaterRouter } from "./features/updater/router";
 import { utilsRouter } from "./features/utils/router";
@@ -65,6 +66,7 @@ export function buildRouter(pluginRouters: Contribution<AnyRouter>[]) {
     rules: rulesRouter,
     plugins: pluginsRouter,
     skills: skillsRouter,
+    stats: statsRouter,
     storage: storageRouter,
     updater: updaterRouter,
     utils: utilsRouter,

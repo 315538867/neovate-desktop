@@ -12,6 +12,7 @@ import { providerContract } from "./features/provider/contract";
 import { remoteControlContract } from "./features/remote-control/contract";
 import { rulesContract } from "./features/rules/contract";
 import { skillsContract } from "./features/skills/contract";
+import { statsContract } from "./features/stats/contract";
 import { storageContract } from "./features/storage/contract";
 import { updaterContract } from "./features/updater/contract";
 import { utilsContract } from "./features/utils/contract";
@@ -31,6 +32,7 @@ export const contract = {
   rules: rulesContract,
   plugins: pluginsContract,
   skills: skillsContract,
+  stats: statsContract,
   storage: storageContract,
   updater: updaterContract,
   utils: utilsContract,
