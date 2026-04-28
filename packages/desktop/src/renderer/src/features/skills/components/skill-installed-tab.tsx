@@ -3,21 +3,21 @@ import { ArrowUpCircle } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { Project } from "../../../../../shared/features/project/types";
-import type { SkillMeta, SkillUpdate } from "../../../../../shared/features/skills/types";
+import type { Project } from "../../../../../../shared/features/project/types";
+import type { SkillMeta, SkillUpdate } from "../../../../../../shared/features/skills/types";
 
-import { Badge } from "../../../components/ui/badge";
+import { Badge } from "../../../../components/ui/badge";
 import {
   Select,
   SelectItem,
   SelectPopup,
   SelectTrigger,
   SelectValue,
-} from "../../../components/ui/select";
-import { Switch } from "../../../components/ui/switch";
-import { client } from "../../../orpc";
-import { claudeCodeChatManager } from "../../agent/chat-manager";
-import { useProjectStore } from "../../project/store";
+} from "../../../../components/ui/select";
+import { Switch } from "../../../../components/ui/switch";
+import { client } from "../../../../orpc";
+import { claudeCodeChatManager } from "../../../agent/chat-manager";
+import { useProjectStore } from "../../../project/store";
 import { SkillDetailModal } from "./skill-detail-modal";
 
 const log = debug("neovate:settings:skills");
@@ -100,6 +100,8 @@ export const SkillInstalledTab = ({
     }
   };
 
+  const showScopeBadge = scopeFilter === "all";
+
   if (error) {
     return (
       <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
@@ -148,36 +150,51 @@ export const SkillInstalledTab = ({
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-xl bg-card border border-border/50 divide-y divide-border/50">
           {filteredSkills.map((skill) => {
             const initials = getInitials(skill.name);
             const update = getUpdate(skill);
             return (
               <div
                 key={`${skill.scope}-${skill.projectPath ?? ""}-${skill.dirName}`}
-                className="group relative flex gap-3 p-3.5 rounded-xl bg-card/80 border border-border/40 cursor-pointer hover:bg-card hover:border-border/60 hover:shadow-sm transition-colors duration-200"
+                className="group relative flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors duration-150 first:rounded-t-xl last:rounded-b-xl"
                 onClick={() => setSelectedSkill(skill)}
               >
-                <div className="flex items-center justify-center size-10 rounded-lg bg-muted text-muted-foreground text-sm font-semibold shrink-0 self-center">
+                <div className="flex items-center justify-center size-8 rounded-md bg-muted text-muted-foreground text-xs font-semibold shrink-0">
                   {initials}
                 </div>
 
-                <div className="flex-1 min-w-0 py-0.5">
-                  <div className="flex items-center gap-1.5">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
                     <h3 className="text-sm font-medium text-foreground truncate">{skill.name}</h3>
-                    {update && (
-                      <Badge variant="default" size="sm" className="gap-0.5 shrink-0">
-                        <ArrowUpCircle className="size-3" />
-                        {update.latestVersion}
-                      </Badge>
-                    )}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {showScopeBadge && (
+                        <Badge variant="outline" size="sm">
+                          {skill.scope === "global"
+                            ? t("settings.skills.scopeGlobal")
+                            : (skill.projectPath?.split("/").pop() ??
+                              t("settings.skills.scopeProject"))}
+                        </Badge>
+                      )}
+                      {skill.version && (
+                        <Badge variant="secondary" size="sm">
+                          v{skill.version}
+                        </Badge>
+                      )}
+                      {update && (
+                        <Badge variant="default" size="sm" className="gap-1">
+                          <ArrowUpCircle className="size-3" />
+                          {update.latestVersion}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">
                     {skill.description || t("settings.skills.noDescription")}
                   </p>
                 </div>
 
-                <div className="shrink-0 self-center" onClick={(e) => e.stopPropagation()}>
+                <div onClick={(e) => e.stopPropagation()} className="shrink-0">
                   <Switch
                     checked={skill.enabled}
                     disabled={togglingSkill !== null}

@@ -125,58 +125,62 @@ export const DiscoverTab = ({
           </button>
         </div>
       )}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="rounded-xl bg-card border border-border/50 divide-y divide-border/50">
         {plugins.map((plugin) => {
           const key = `${plugin.name}@${plugin.marketplace}`;
           const initials = getInitials(plugin.name);
           return (
             <div
               key={key}
-              className="group relative flex gap-3 p-3.5 rounded-xl bg-card/80 border border-border/40 cursor-pointer hover:bg-card hover:border-border/60 hover:shadow-sm transition-colors duration-200"
+              className="group relative flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors duration-150 first:rounded-t-xl last:rounded-b-xl"
               onClick={() => setSelectedPlugin(plugin)}
             >
-              <div className="flex items-center justify-center size-10 rounded-lg bg-muted text-muted-foreground text-sm font-semibold shrink-0 self-center">
+              <div className="flex items-center justify-center size-8 rounded-md bg-muted text-muted-foreground text-xs font-semibold shrink-0">
                 {initials}
               </div>
 
-              <div className="flex-1 min-w-0 py-0.5">
-                <div className="flex items-center gap-1.5">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
                   <h3 className="text-sm font-medium text-foreground truncate">{plugin.name}</h3>
-                  {plugin.category && (
-                    <Badge variant="secondary" size="sm" className="shrink-0">
-                      {plugin.category}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Badge variant="outline" size="sm">
+                      {plugin.marketplace}
                     </Badge>
-                  )}
+                    {plugin.category && (
+                      <Badge variant="secondary" size="sm">
+                        {plugin.category}
+                      </Badge>
+                    )}
+                    {plugin.installedScopes.length > 0 && (
+                      <Badge variant="success" size="sm">
+                        {t("settings.plugins.installedBadge")}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
+                <p className="text-xs text-muted-foreground truncate mt-0.5">
                   {plugin.description || t("settings.plugins.noDescription")}
                 </p>
               </div>
 
-              <div className="shrink-0 self-center h-7 flex items-center">
-                {plugin.installedScopes.length > 0 ? (
-                  <Badge variant="secondary" size="sm">
-                    {t("settings.plugins.installedBadge")}
-                  </Badge>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
-                    disabled={installingId !== null}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleQuickInstall(plugin);
-                    }}
-                  >
-                    {installingId === key ? (
-                      <Spinner className="size-3.5" />
-                    ) : (
-                      <Download className="size-3.5" />
-                    )}
-                  </Button>
-                )}
-              </div>
+              {plugin.installedScopes.length === 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150 shrink-0"
+                  disabled={installingId !== null}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleQuickInstall(plugin);
+                  }}
+                >
+                  {installingId === key ? (
+                    <Spinner className="size-3.5" />
+                  ) : (
+                    <Download className="size-3.5" />
+                  )}
+                </Button>
+              )}
             </div>
           );
         })}
