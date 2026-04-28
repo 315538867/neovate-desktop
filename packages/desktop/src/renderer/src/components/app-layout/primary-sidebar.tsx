@@ -3,6 +3,7 @@ import { type ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
 import { APP_LAYOUT_GRID_AREA } from "./constants";
+import { AppLayoutPanelActivity } from "./panel-activity";
 import { usePanelState } from "./store";
 
 const SPRING = { type: "spring" as const, stiffness: 600, damping: 49 };
@@ -22,15 +23,13 @@ export function AppLayoutPrimarySidebar({ children }: { children: ReactNode }) {
       animate={{ width: collapsed ? 0 : width }}
       transition={isResizing ? { duration: 0 } : SPRING}
     >
-      {/* No <Activity> wrapper here — the sidebar already collapses to width:0 with
-          overflow:hidden, so content is invisible. Using Activity would apply display:none,
-          which makes base-ui accordion panels trigger data-starting-style:h-0 on re-show,
-          visually collapsing all open project accordions. */}
-      <div className="flex h-full flex-col" style={{ width }}>
-        {/* Fixed spacer so the scrollable area (content + scrollbar track) starts below the top rounded corner */}
-        <div className="shrink-0 h-7" />
-        <div className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden">{children}</div>
-      </div>
+      <AppLayoutPanelActivity active={!collapsed}>
+        <div className="flex h-full flex-col" style={{ width }}>
+          {/* Fixed spacer so the scrollable area (content + scrollbar track) starts below the top rounded corner */}
+          <div className="shrink-0 h-7" />
+          <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+        </div>
+      </AppLayoutPanelActivity>
     </motion.aside>
   );
 }

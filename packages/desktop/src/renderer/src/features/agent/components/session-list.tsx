@@ -1,13 +1,14 @@
 import debug from "debug";
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { useLayoutStore } from "../../../components/app-layout/store";
-import { useOptionHeld } from "../../../hooks/use-option-held";
+import type { SessionInfo } from "../../../../../shared/features/agent/types";
+import type { UnifiedItem } from "../hooks/use-unified-sessions";
+import type { ChatSession } from "../store";
+
 import { useConfigStore } from "../../config/store";
 import { useProjectStore } from "../../project/store";
 import { useLoadSession } from "../hooks/use-load-session";
-import { useFilteredSessions } from "../hooks/use-unified-sessions";
 import { useAgentStore } from "../store";
 import { ChronologicalList } from "./chronological-list";
 import { EmptySessionState } from "./empty-session-state";
@@ -35,13 +36,10 @@ export function SessionList() {
 // --- Multi-project mode ---
 
 function MultiProjectSessionList() {
-  const collapsed = useLayoutStore((s) => s.panels.primarySidebar.collapsed);
   const sidebarOrganize = useConfigStore((s) => s.sidebarOrganize);
   const loadSessionPreferences = useProjectStore((s) => s.loadSessionPreferences);
   const projects = useProjectStore((s) => s.projects);
   const activeProject = useProjectStore((s) => s.activeProject);
-  const optionHeld = useOptionHeld();
-  const isChronological = sidebarOrganize === "chronological";
   log("multi-project: organize=%s projects=%d", sidebarOrganize, projects.length);
 
   useEffect(() => {
@@ -49,15 +47,18 @@ function MultiProjectSessionList() {
     loadSessionPreferences();
   }, [projects, loadSessionPreferences]);
 
-  // Don't mount session list when sidebar is collapsed — eliminates all subscriptions
-  if (collapsed) return null;
-
   return (
-    <div className="flex flex-1 flex-col pt-2">
-      <PanelTriggerGroup projectPath={activeProject?.path} />
-      <PinnedSessionList optionHeld={optionHeld} />
-      <SidebarTitleBar />
-      {isChronological ? <ChronologicalList optionHeld={optionHeld} /> : <ProjectAccordionList />}
+    <div className="flex min-h-0 flex-1 flex-col pt-2">
+      {/* Fixed header area - does not scroll */}
+      <div className="shrink-0">
+        <PanelTriggerGroup projectPath={activeProject?.path} />
+      </div>
+      {/* Scrollable session list area */}
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+        <PinnedSessionList />
+        <SidebarTitleBar />
+        {sidebarOrganize === "chronological" ? <ChronologicalList /> : <ProjectAccordionList />}
+      </div>
     </div>
   );
 }
@@ -66,12 +67,15 @@ function MultiProjectSessionList() {
 
 const SingleProjectSessionList = memo(function SingleProjectSessionList() {
   const { t } = useTranslation();
-  const collapsed = useLayoutStore((s) => s.panels.primarySidebar.collapsed);
+  const sessions = useAgentStore((s) => s.sessions);
   const activeSessionId = useAgentStore((s) => s.activeSessionId);
   const setActiveSession = useAgentStore((s) => s.setActiveSession);
+  const agentSessions = useAgentStore((s) => s.agentSessions);
   const sessionsLoaded = useAgentStore((s) => s.sessionsLoaded);
 
   const activeProject = useProjectStore((s) => s.activeProject);
+  const archivedSessions = useProjectStore((s) => s.archivedSessions);
+  const pinnedSessions = useProjectStore((s) => s.pinnedSessions);
   const loadSessionPreferences = useProjectStore((s) => s.loadSessionPreferences);
 
   const [restoring, setRestoring] = useState<string | null>(null);
@@ -95,7 +99,7 @@ const SingleProjectSessionList = memo(function SingleProjectSessionList() {
       }
     },
     [loadSession],
-  ) as (sessionId: string, projectPath?: string) => Promise<void>;
+  );
 
   const handleActivate = useCallback(
     (sessionId: string) => {
@@ -104,14 +108,53 @@ const SingleProjectSessionList = memo(function SingleProjectSessionList() {
     [setActiveSession],
   ) as (sessionId: string, projectPath?: string) => void;
 
-  const pinnedItems = useFilteredSessions({
-    projectPath: projectPath ?? undefined,
-    filter: "pinned",
-  });
-  const regularItems = useFilteredSessions({
-    projectPath: projectPath ?? undefined,
-    filter: "unpinned",
-  });
+  const { pinnedItems, regularItems, pinned } = useMemo(() => {
+    if (!projectPath) return { pinnedItems: [], regularItems: [], pinned: new Set<string>() };
+
+    const archived = new Set(archivedSessions[projectPath] ?? []);
+    const pinnedSet = new Set(pinnedSessions[projectPath] ?? []);
+    const matchesProject = (cwd?: string) => cwd?.startsWith(projectPath) ?? false;
+
+    const loadedIds = new Set(sessions.keys());
+
+    const allInMemory = (Array.from(sessions.values()) as ChatSession[]).filter(
+      (s) => matchesProject(s.cwd) && !archived.has(s.sessionId) && !s.isNew,
+    );
+
+    const allPersisted = agentSessions.filter(
+      (s) => !loadedIds.has(s.sessionId) && matchesProject(s.cwd) && !archived.has(s.sessionId),
+    );
+
+    const toUnified = (items: ChatSession[], persisted: SessionInfo[]): UnifiedItem[] => {
+      const mem: UnifiedItem[] = items.map((s) => ({
+        kind: "memory",
+        session: s,
+        projectPath,
+      }));
+      const per: UnifiedItem[] = persisted.map((s) => ({
+        kind: "persisted",
+        info: s,
+        projectPath,
+      }));
+      return [...mem, ...per].sort((a, b) => {
+        const aDate = a.kind === "memory" ? a.session.createdAt : a.info.createdAt;
+        const bDate = b.kind === "memory" ? b.session.createdAt : b.info.createdAt;
+        return bDate.localeCompare(aDate);
+      });
+    };
+
+    return {
+      pinnedItems: toUnified(
+        allInMemory.filter((s) => pinnedSet.has(s.sessionId)),
+        allPersisted.filter((s) => pinnedSet.has(s.sessionId)),
+      ),
+      regularItems: toUnified(
+        allInMemory.filter((s) => !pinnedSet.has(s.sessionId)),
+        allPersisted.filter((s) => !pinnedSet.has(s.sessionId)),
+      ),
+      pinned: pinnedSet,
+    };
+  }, [sessions, agentSessions, archivedSessions, pinnedSessions, projectPath]);
 
   if (!activeProject || !projectPath) {
     return (
@@ -121,48 +164,55 @@ const SingleProjectSessionList = memo(function SingleProjectSessionList() {
     );
   }
 
-  // Don't mount session list when sidebar is collapsed
-  if (collapsed) return null;
-
   return (
-    <div className="flex flex-1 flex-col gap-1 pt-2">
-      <PanelTriggerGroup projectPath={projectPath} />
-      {pinnedItems.length === 0 && regularItems.length === 0 ? (
-        sessionsLoaded ? (
-          <EmptySessionState />
-        ) : null
-      ) : (
-        <ul className="flex flex-col gap-1">
-          {pinnedItems.map((item) => {
-            const id = item.kind === "memory" ? item.session.sessionId : item.info.sessionId;
-            return (
-              <UnifiedSessionItem
-                key={id}
-                item={item}
-                activeSessionId={activeSessionId}
-                isPinned={true}
-                restoring={restoring}
-                onActivate={handleActivate}
-                onLoad={handleLoad}
-              />
-            );
-          })}
-          {regularItems.map((item) => {
-            const id = item.kind === "memory" ? item.session.sessionId : item.info.sessionId;
-            return (
-              <UnifiedSessionItem
-                key={id}
-                item={item}
-                activeSessionId={activeSessionId}
-                isPinned={false}
-                restoring={restoring}
-                onActivate={handleActivate}
-                onLoad={handleLoad}
-              />
-            );
-          })}
-        </ul>
-      )}
+    <div className="flex min-h-0 flex-1 flex-col gap-1 pt-2">
+      {/* Fixed header area - does not scroll */}
+      <div className="shrink-0">
+        <PanelTriggerGroup projectPath={projectPath} />
+      </div>
+      {/* Scrollable session list area */}
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+        {pinnedItems.length === 0 && regularItems.length === 0 ? (
+          sessionsLoaded ? (
+            <EmptySessionState />
+          ) : null
+        ) : (
+          <ul className="flex flex-col gap-1">
+            {pinnedItems.length > 0 && (
+              <>
+                {pinnedItems.map((item) => {
+                  const id = item.kind === "memory" ? item.session.sessionId : item.info.sessionId;
+                  return (
+                    <UnifiedSessionItem
+                      key={id}
+                      item={item}
+                      activeSessionId={activeSessionId}
+                      isPinned={true}
+                      restoring={restoring}
+                      onActivate={handleActivate}
+                      onLoad={handleLoad}
+                    />
+                  );
+                })}
+              </>
+            )}
+            {regularItems.map((item) => {
+              const id = item.kind === "memory" ? item.session.sessionId : item.info.sessionId;
+              return (
+                <UnifiedSessionItem
+                  key={id}
+                  item={item}
+                  activeSessionId={activeSessionId}
+                  isPinned={pinned.has(id)}
+                  restoring={restoring}
+                  onActivate={handleActivate}
+                  onLoad={handleLoad}
+                />
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </div>
   );
 });
