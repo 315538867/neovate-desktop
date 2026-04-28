@@ -126,33 +126,5 @@ function convertGitignoreToMinimatch(gitignoreRule: string): string[] {
  * @returns array of exclude patterns
  */
 export async function getExcludePatterns(rootPath: string): Promise<string[]> {
-  // check cache
-  const cacheKey = rootPath;
-  const cached = gitignoreCache.get(cacheKey);
-
-  if (cached) {
-    return cached;
-  }
-  log("computing exclude patterns", { rootPath });
-
-  const gitignorePatterns: string[] = [];
-
-  try {
-    // collect git ignore rules from root directory
-    const gitRules = await collectGitignoreRules(rootPath);
-
-    // convert gitignore rules
-    for (const rule of gitRules) {
-      const converted = convertGitignoreToMinimatch(rule);
-      gitignorePatterns.push(...converted);
-    }
-  } catch (error) {
-    log("failed to process gitignore rules", { error });
-  }
-
-  const allPatterns = [...EXCLUDE_FILE_TYPE_PATTERN, ...gitignorePatterns];
-  const uniquePatterns = [...new Set(allPatterns)];
-  gitignoreCache.set(cacheKey, uniquePatterns);
-
-  return uniquePatterns;
+  return EXCLUDE_FILE_TYPE_PATTERN;
 }
