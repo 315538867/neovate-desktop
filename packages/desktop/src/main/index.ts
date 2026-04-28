@@ -187,6 +187,7 @@ app.whenReady().then(async () => {
 
   // Transport — Electron MessagePort. Swap for WS/HTTP in other environments.
   const handler = new RPCHandler(mainApp.router);
+  ipcMain.removeAllListeners("start-orpc-server");
   ipcMain.on("start-orpc-server", (event) => {
     const [serverPort] = event.ports;
     log("start-orpc-server received, upgrading message port");

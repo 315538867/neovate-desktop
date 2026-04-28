@@ -218,12 +218,13 @@ export default function TerminalView() {
     xterm.loadAddon(webgl);
 
     // Select-to-copy
-    container.addEventListener("mouseup", () => {
+    const onMouseUp = () => {
       if (xterm.hasSelection()) {
         const text = xterm.getSelection();
         if (text) navigator.clipboard.writeText(text).catch(() => {});
       }
-    });
+    };
+    container.addEventListener("mouseup", onMouseUp);
 
     // Keyboard shortcuts
     xterm.attachCustomKeyEventHandler((event) => {
@@ -315,6 +316,7 @@ export default function TerminalView() {
       clearTimeout(searchTimerRef.current);
       resultsDisposable.dispose();
       observer.disconnect();
+      container.removeEventListener("mouseup", onMouseUp);
       if (sessionId) client.terminal.kill({ sessionId });
       xterm.dispose();
     };

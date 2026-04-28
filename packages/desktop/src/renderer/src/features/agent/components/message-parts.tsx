@@ -208,11 +208,13 @@ export const MessagePartRenderer = memo(
     isStreaming?: boolean;
   }) => {
     const markdownComponents = useMarkdownComponents();
-    const lastTextIndex = message.parts.findLastIndex((p) => p.type === "text");
-
-    // Collect all image file parts for grouped rendering
-    const imageFileParts = useMemo(() => message.parts.filter(isImageFilePart), [message.parts]);
-    const firstImageIndex = message.parts.findIndex(isImageFilePart);
+    const { lastTextIndex, firstImageIndex, imageFileParts } = useMemo(() => {
+      return {
+        lastTextIndex: message.parts.findLastIndex((p) => p.type === "text"),
+        firstImageIndex: message.parts.findIndex(isImageFilePart),
+        imageFileParts: message.parts.filter(isImageFilePart),
+      };
+    }, [message.parts]);
 
     return (
       <div className="flex flex-col gap-2 w-full">

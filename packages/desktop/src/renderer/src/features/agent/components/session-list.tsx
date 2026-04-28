@@ -1,6 +1,7 @@
 import debug from "debug";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 
 import type { SessionInfo } from "../../../../../shared/features/agent/types";
 import type { UnifiedItem } from "../hooks/use-unified-sessions";
@@ -67,7 +68,9 @@ function MultiProjectSessionList() {
 
 const SingleProjectSessionList = memo(function SingleProjectSessionList() {
   const { t } = useTranslation();
-  const sessions = useAgentStore((s) => s.sessions);
+  const sessionsArray = useAgentStore(
+    useShallow((s) => Array.from(s.sessions.values()) as ChatSession[]),
+  );
   const activeSessionId = useAgentStore((s) => s.activeSessionId);
   const setActiveSession = useAgentStore((s) => s.setActiveSession);
   const agentSessions = useAgentStore((s) => s.agentSessions);
@@ -115,9 +118,9 @@ const SingleProjectSessionList = memo(function SingleProjectSessionList() {
     const pinnedSet = new Set(pinnedSessions[projectPath] ?? []);
     const matchesProject = (cwd?: string) => cwd?.startsWith(projectPath) ?? false;
 
-    const loadedIds = new Set(sessions.keys());
+    const loadedIds = new Set(sessionsArray.map((s) => s.sessionId));
 
-    const allInMemory = (Array.from(sessions.values()) as ChatSession[]).filter(
+    const allInMemory = sessionsArray.filter(
       (s) => matchesProject(s.cwd) && !archived.has(s.sessionId) && !s.isNew,
     );
 
@@ -154,7 +157,7 @@ const SingleProjectSessionList = memo(function SingleProjectSessionList() {
       ),
       pinned: pinnedSet,
     };
-  }, [sessions, agentSessions, archivedSessions, pinnedSessions, projectPath]);
+  }, [sessionsArray, agentSessions, archivedSessions, pinnedSessions, projectPath]);
 
   if (!activeProject || !projectPath) {
     return (

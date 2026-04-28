@@ -6,6 +6,8 @@ import type { DeeplinkHandler } from "./types";
 
 const log = debug("neovate:deeplink");
 
+const MAX_PENDING_EVENTS = 100;
+
 export class DeeplinkService {
   readonly publisher = new EventPublisher<{ deeplink: DeeplinkEvent }>();
   private buffer: string[] = [];
@@ -84,6 +86,10 @@ export class DeeplinkService {
     if (this.publisher.size > 0) {
       this.publisher.publish("deeplink", event);
     } else {
+      if (this.pending.length >= MAX_PENDING_EVENTS) {
+        log("pending buffer full, dropping oldest event");
+        this.pending.shift();
+      }
       this.pending.push(event);
     }
   }

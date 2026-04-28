@@ -217,40 +217,46 @@ function FilesViewComponent({ project }: FilesViewProps) {
     onPaste: (node) => handlePaste(node),
   });
 
-  const handleSelect = (item: FileNodeItem) => {
-    select(item.fullPath);
+  const handleSelect = useCallback(
+    (item: FileNodeItem) => {
+      select(item.fullPath);
 
-    if (!item.isFolder && project) {
-      log("open file path=%s", item.relPath);
-      app.workbench.contentPanel.openView("editor");
-      window.dispatchEvent(
-        new CustomEvent("neovate:open-editor", {
-          detail: { fullPath: item.fullPath },
-        }),
-      );
-      // @ts-ignore avoid accessing before initialization completes
-      window.pendingEditorRequest = { fullPath: item.fullPath };
-    }
-  };
+      if (!item.isFolder && project) {
+        log("open file path=%s", item.relPath);
+        app.workbench.contentPanel.openView("editor");
+        window.dispatchEvent(
+          new CustomEvent("neovate:open-editor", {
+            detail: { fullPath: item.fullPath },
+          }),
+        );
+        // @ts-ignore avoid accessing before initialization completes
+        window.pendingEditorRequest = { fullPath: item.fullPath };
+      }
+    },
+    [select, project, app],
+  );
 
-  const revealInFileManager = async (path: string) => {
-    log("reveal in file manager", { path });
-    const result = await client.files.revealInFileManager({ path });
-    if (!result.success && result.error) {
-      toastManager.add({
-        type: "error",
-        title: t("contextMenu.revealInFinder"),
-        description: result.error,
-      });
-    }
-  };
+  const revealInFileManager = useCallback(
+    async (path: string) => {
+      log("reveal in file manager", { path });
+      const result = await client.files.revealInFileManager({ path });
+      if (!result.success && result.error) {
+        toastManager.add({
+          type: "error",
+          title: t("contextMenu.revealInFinder"),
+          description: result.error,
+        });
+      }
+    },
+    [client.files, t],
+  );
 
-  const handleDelete = (item: FileNodeItem) => {
+  const handleDelete = useCallback((item: FileNodeItem) => {
     setItemToDelete(item);
     setDeleteConfirmOpen(true);
-  };
+  }, []);
 
-  const handleConfirmDelete = async () => {
+  const handleConfirmDelete = useCallback(async () => {
     if (!itemToDelete) return;
     const targetPath = itemToDelete.fullPath;
     log("confirm delete", { path: itemToDelete.fullPath });
@@ -274,164 +280,188 @@ function FilesViewComponent({ project }: FilesViewProps) {
       setDeleteConfirmOpen(false);
       setItemToDelete(null);
     }
-  };
-  const handleRename = async (oldPath: string, newPath: string): Promise<boolean> => {
-    log("rename", { oldPath, newPath });
-    try {
-      const result = await client.files.rename({ oldPath, newPath });
-      if (result.success) {
-        renameEffect(oldPath, newPath);
-        return true;
-      } else {
+  }, [itemToDelete, client.files, removeNode, t]);
+
+  const handleRename = useCallback(
+    async (oldPath: string, newPath: string): Promise<boolean> => {
+      log("rename", { oldPath, newPath });
+      try {
+        const result = await client.files.rename({ oldPath, newPath });
+        if (result.success) {
+          renameEffect(oldPath, newPath);
+          return true;
+        } else {
+          toastManager.add({
+            type: "error",
+            title: t("error.renameFailed", { error: result.error }),
+          });
+          return false;
+        }
+      } catch (error) {
+        console.error("Error renaming file:", error);
         toastManager.add({
           type: "error",
-          title: t("error.renameFailed", { error: result.error }),
+          title: t("error.renameFailed", { error: String(error) }),
         });
         return false;
       }
-    } catch (error) {
-      console.error("Error renaming file:", error);
-      toastManager.add({
-        type: "error",
-        title: t("error.renameFailed", { error: String(error) }),
-      });
-      return false;
-    }
-  };
+    },
+    [client.files, renameEffect, t],
+  );
 
-  const handleCreate = async (newNode: { parentPath: string; name: string; isFolder: boolean }) => {
-    const { parentPath, name, isFolder } = newNode || {};
-    if (!parentPath || !name) {
-      return;
-    }
-    if (!isFolder) {
-      createFile(parentPath, name);
-    } else {
-      createFolder(parentPath, name);
-    }
-  };
-
-  const createFile = async (parentPath: string, name: string) => {
-    const fullPath = `${parentPath}/${name}`;
-    log("create file", { parentPath, name, fullPath });
-    try {
-      const result = await client.files.createFile({ path: fullPath });
-      if (result.success) {
-        setTimeout(() => {
-          select(fullPath);
-        }, 1500); // simple delay to wait for data loaded
-      } else {
+  const createFile = useCallback(
+    async (parentPath: string, name: string) => {
+      const fullPath = `${parentPath}/${name}`;
+      log("create file", { parentPath, name, fullPath });
+      try {
+        const result = await client.files.createFile({ path: fullPath });
+        if (result.success) {
+          setTimeout(() => {
+            select(fullPath);
+          }, 1500); // simple delay to wait for data loaded
+        } else {
+          toastManager.add({
+            type: "error",
+            title: getCreateErrorMessage(result.errorCode, result.error || "", "file", t),
+          });
+        }
+      } catch (error) {
+        console.error("Error creating file:", error);
         toastManager.add({
           type: "error",
-          title: getCreateErrorMessage(result.errorCode, result.error || "", "file", t),
+          title: t("error.createFileFailed", { error: String(error) }),
         });
       }
-    } catch (error) {
-      console.error("Error creating file:", error);
-      toastManager.add({
-        type: "error",
-        title: t("error.createFileFailed", { error: String(error) }),
-      });
-    }
-  };
+    },
+    [client.files, select, t],
+  );
 
-  const createFolder = async (parentPath: string, name: string) => {
-    const fullPath = `${parentPath}/${name}`;
-    log("create folder", { parentPath, name, fullPath });
-    try {
-      const result = await client.files.createFolder({ path: fullPath });
-      if (result.success) {
-        setTimeout(() => {
-          select(fullPath);
-        }, 1500);
-      } else {
+  const createFolder = useCallback(
+    async (parentPath: string, name: string) => {
+      const fullPath = `${parentPath}/${name}`;
+      log("create folder", { parentPath, name, fullPath });
+      try {
+        const result = await client.files.createFolder({ path: fullPath });
+        if (result.success) {
+          setTimeout(() => {
+            select(fullPath);
+          }, 1500);
+        } else {
+          toastManager.add({
+            type: "error",
+            title: getCreateErrorMessage(result.errorCode, result.error || "", "folder", t),
+          });
+        }
+      } catch (error) {
+        console.error("Error creating folder:", error);
         toastManager.add({
           type: "error",
-          title: getCreateErrorMessage(result.errorCode, result.error || "", "folder", t),
+          title: t("error.createFolderFailed", { error: String(error) }),
         });
       }
-    } catch (error) {
-      console.error("Error creating folder:", error);
-      toastManager.add({
-        type: "error",
-        title: t("error.createFolderFailed", { error: String(error) }),
-      });
-    }
-  };
+    },
+    [client.files, select, t],
+  );
+
+  const handleCreate = useCallback(
+    async (newNode: { parentPath: string; name: string; isFolder: boolean }) => {
+      const { parentPath, name, isFolder } = newNode || {};
+      if (!parentPath || !name) {
+        return;
+      }
+      if (!isFolder) {
+        createFile(parentPath, name);
+      } else {
+        createFolder(parentPath, name);
+      }
+    },
+    [createFile, createFolder],
+  );
 
   /** Add file to conversation */
-  const handleAddContext = (item: FileNodeItem) => {
+  const handleAddContext = useCallback((item: FileNodeItem) => {
     log("insert-chat dispatching mention=%s", item.relPath);
     window.dispatchEvent(
       new CustomEvent("neovate:insert-chat", {
         detail: { mentions: [{ id: item.relPath, label: item.relPath }] },
       }),
     );
-  };
+  }, []);
 
-  const handleCopy = (item: FileNodeItem) => {
+  const handleCopy = useCallback((item: FileNodeItem) => {
     log("copy to clipboard", { sourcePath: item.fullPath });
     setClipboardItem({ sourcePath: item.fullPath, operation: "copy" });
-  };
-  const handleCut = (item: FileNodeItem) => {
+  }, []);
+  const handleCut = useCallback((item: FileNodeItem) => {
     log("cut to clipboard", { sourcePath: item.fullPath });
     setClipboardItem({ sourcePath: item.fullPath, operation: "cut" });
-  };
+  }, []);
 
   /** Check if paste is allowed at target path */
-  const canPaste = (targetPath: string): boolean => {
-    if (!clipboardItem) return false;
-    // Cannot paste to itself or descendant
-    if (clipboardItem.sourcePath === targetPath) return false;
-    if (targetPath.startsWith(clipboardItem.sourcePath + "/")) return false;
-    return true;
-  };
+  const canPaste = useCallback(
+    (targetPath: string): boolean => {
+      if (!clipboardItem) return false;
+      // Cannot paste to itself or descendant
+      if (clipboardItem.sourcePath === targetPath) return false;
+      if (targetPath.startsWith(clipboardItem.sourcePath + "/")) return false;
+      return true;
+    },
+    [clipboardItem],
+  );
 
   /** Paste file from clipboard to target directory */
-  const handlePaste = async (targetDir: string) => {
-    if (!clipboardItem) return;
-    const { sourcePath, operation } = clipboardItem;
-    const fileName = sourcePath.split("/").pop() || "";
-    const targetPath = `${targetDir}/${fileName}`;
+  const handlePaste = useCallback(
+    async (targetDir: string) => {
+      if (!clipboardItem) return;
+      const { sourcePath, operation } = clipboardItem;
+      const fileName = sourcePath.split("/").pop() || "";
+      const targetPath = `${targetDir}/${fileName}`;
 
-    log("paste", { sourcePath, targetPath, operation });
+      log("paste", { sourcePath, targetPath, operation });
 
-    try {
-      if (operation === "copy") {
-        const result = await client.files.copy({ sourcePath, targetPath });
-        if (!result.success) {
-          toastManager.add({
-            type: "error",
-            title: t("error.copyFailed", { error: result.error }),
-          });
-          return;
-        }
-      } else {
-        if (sourcePath === targetPath) {
+      try {
+        if (operation === "copy") {
+          const result = await client.files.copy({ sourcePath, targetPath });
+          if (!result.success) {
+            toastManager.add({
+              type: "error",
+              title: t("error.copyFailed", { error: result.error }),
+            });
+            return;
+          }
+        } else {
+          if (sourcePath === targetPath) {
+            setClipboardItem(null);
+            return;
+          }
+          const result = await client.files.move({ sourcePath, targetPath });
+          if (!result.success) {
+            toastManager.add({
+              type: "error",
+              title: t("error.moveFailed", { error: result.error }),
+            });
+            return;
+          }
+          // Clear clipboard after cut operation completes
           setClipboardItem(null);
-          return;
         }
-        const result = await client.files.move({ sourcePath, targetPath });
-        if (!result.success) {
-          toastManager.add({
-            type: "error",
-            title: t("error.moveFailed", { error: result.error }),
-          });
-          return;
-        }
-        // Clear clipboard after cut operation completes
-        setClipboardItem(null);
+      } catch (error) {
+        console.error("Error pasting file:", error);
+        toastManager.add({
+          type: "error",
+          title: t(operation === "copy" ? "error.copyFailed" : "error.moveFailed", {
+            error: String(error),
+          }),
+        });
       }
-    } catch (error) {
-      console.error("Error pasting file:", error);
-      toastManager.add({
-        type: "error",
-        title: t(operation === "copy" ? "error.copyFailed" : "error.moveFailed", {
-          error: String(error),
-        }),
-      });
-    }
-  };
+    },
+    [clipboardItem, client.files, t],
+  );
+
+  const handleReveal = useCallback(
+    (item: FileNodeItem) => revealInFileManager(item.fullPath),
+    [revealInFileManager],
+  );
 
   // --- Reveal pending file when panel becomes visible ---
   useEffect(() => {
@@ -644,7 +674,7 @@ function FilesViewComponent({ project }: FilesViewProps) {
                         onCut={handleCut}
                         onPaste={handlePaste}
                         canPaste={canPaste}
-                        onReveal={(item) => revealInFileManager(item.fullPath)}
+                        onReveal={handleReveal}
                         cutSourcePath={
                           clipboardItem?.operation === "cut" ? clipboardItem.sourcePath : null
                         }
