@@ -15,4 +15,6 @@ packages/desktop/vendor/bun/
 packages/desktop/vendor/rtk/
 .worktrees/
 .firecrawl/
+.zcf/
 /tmp
+*CLAUDE.md
