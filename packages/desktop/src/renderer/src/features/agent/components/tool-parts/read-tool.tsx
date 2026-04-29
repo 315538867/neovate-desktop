@@ -17,7 +17,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../../../../components/ui/tooltip";
-import { useRendererApp } from "../../../../core";
+import { useRendererApp } from "../../../../core/app";
 
 export function ReadTool({ invocation }: { invocation: ReadUIToolInvocation }) {
   const app = useRendererApp();

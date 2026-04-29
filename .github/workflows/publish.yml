@@ -64,8 +64,6 @@ jobs:
         working-directory: packages/desktop
         run: bun run build && bunx electron-builder --mac --${{ matrix.arch }} --config configs/electron-builder.mjs --publish=never
         env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}

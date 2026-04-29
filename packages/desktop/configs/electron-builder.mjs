@@ -1,5 +1,13 @@
 import { isDev, deeplinkScheme } from "./build-env.mjs";
 
+const hasMacSigningCert = Boolean(process.env.CSC_LINK?.trim());
+const shouldNotarize = Boolean(
+  hasMacSigningCert &&
+  process.env.APPLE_ID &&
+  process.env.APPLE_APP_SPECIFIC_PASSWORD &&
+  process.env.APPLE_TEAM_ID,
+);
+
 /**
  * @type {import('electron-builder').Configuration}
  * @see https://www.electron.build/configuration
@@ -104,8 +112,9 @@ const config = {
     hardenedRuntime: true,
     entitlements: "build/entitlements.mac.plist",
     entitlementsInherit: "build/entitlements.mac.plist",
+    identity: hasMacSigningCert ? undefined : null,
     target: ["dmg", "zip"],
-    notarize: !!(process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD),
+    notarize: shouldNotarize,
     files: [
       "!**/node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/*-linux/**",
       "!**/node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/*-win32/**",
