@@ -269,7 +269,7 @@ function AgentChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }
   // Ref to access scroll context for smooth scrolling on new message
   const conversationContextRef = useRef<ConversationHandle | null>(null);
 
-  const { initialScrollBehavior } = useScrollPosition(sessionId, conversationContextRef);
+  useScrollPosition(sessionId, conversationContextRef);
 
   const items = useMemo(
     () =>
@@ -312,11 +312,7 @@ function AgentChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }
 
   return (
     <div className="@container/chat flex h-full flex-col">
-      <Conversation
-        contextRef={conversationContextRef}
-        initial={initialScrollBehavior}
-        items={items}
-      >
+      <Conversation contextRef={conversationContextRef} items={items}>
         <ConversationScrollButton />
       </Conversation>
       <div className="shrink-0 max-w-3xl mx-auto w-full">

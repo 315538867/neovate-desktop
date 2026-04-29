@@ -41,11 +41,6 @@ const ConversationCtx = createContext<ConversationCtxValue>({
 export type ConversationProps = {
   items: ReactNode[];
   className?: string;
-  /**
-   * "smooth" (default) — follow new output smoothly when the user is at bottom.
-   * false — don't auto-follow on mount; use this when restoring a saved scroll position.
-   */
-  initial?: "smooth" | false;
   contextRef?: RefObject<ConversationHandle | null>;
   /**
    * Overlay children rendered alongside the virtualized list (e.g. ConversationScrollButton).
@@ -55,7 +50,7 @@ export type ConversationProps = {
 };
 
 export const Conversation = forwardRef<HTMLDivElement, ConversationProps>(
-  ({ items, className, initial = "smooth", contextRef, children }, _ref) => {
+  ({ items, className, contextRef, children }, _ref) => {
     const handle = useRef<VirtuosoHandle>(null);
     const scrollerRef = useRef<HTMLElement | null>(null);
     const lastScrollTop = useRef(0);
@@ -101,7 +96,7 @@ export const Conversation = forwardRef<HTMLDivElement, ConversationProps>(
             itemContent={(_, node) => (
               <div className="max-w-3xl mx-auto w-full px-4 pb-4">{node}</div>
             )}
-            followOutput={initial === false ? false : "smooth"}
+            followOutput="smooth"
             atBottomStateChange={(b) => {
               setAtBottom(b);
             }}
