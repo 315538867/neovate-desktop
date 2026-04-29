@@ -1,0 +1,55 @@
+import type { PipelineTemplate } from "../../../../../shared/features/agent-orchestrator/schemas";
+
+export const architectReviewBuildVerifyTemplate: PipelineTemplate = {
+  id: "architect-review-build-verify",
+  displayName: "ABCD: 架构→审查→实施→验收",
+  description: "四阶段串行：架构师设计 → 审查员审查 → 实施者编码 → 验收员验证",
+  stages: [
+    {
+      stageId: "architect",
+      instanceId: "A",
+      dependsOn: [],
+      optional: false,
+      userGate: "after",
+      repeatCondition: "on-user-request",
+      maxRetries: 2,
+      timeoutMs: 5 * 60_000,
+    },
+    {
+      stageId: "reviewer",
+      instanceId: "B",
+      dependsOn: ["A"],
+      optional: true,
+      userGate: "after",
+      repeatCondition: "on-user-request",
+      maxRetries: 1,
+      timeoutMs: 3 * 60_000,
+    },
+    {
+      stageId: "implementer",
+      instanceId: "C",
+      dependsOn: ["B"],
+      optional: false,
+      userGate: "after",
+      repeatCondition: "on-failure",
+      maxRetries: 2,
+      timeoutMs: 30 * 60_000,
+    },
+    {
+      stageId: "validator",
+      instanceId: "D",
+      dependsOn: ["C"],
+      optional: true,
+      userGate: "after",
+      repeatCondition: "on-user-request",
+      maxRetries: 1,
+      timeoutMs: 5 * 60_000,
+    },
+  ],
+  defaultExecutorMap: {
+    A: "llm-only",
+    B: "llm-only",
+    C: "claude-code",
+    D: "llm-only",
+  },
+};

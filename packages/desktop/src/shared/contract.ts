@@ -1,6 +1,7 @@
 import { oc, type } from "@orpc/contract";
 import { z } from "zod";
 
+import { orchestratorContract } from "./features/agent-orchestrator/contract";
 import { agentContract } from "./features/agent/contract";
 import { pluginsContract } from "./features/claude-code-plugins/contract";
 import { configContract } from "./features/config/contract";
@@ -38,6 +39,7 @@ export const contract = {
   utils: utilsContract,
   git: gitContract,
   changes: changesContract,
+  orchestrator: orchestratorContract,
   window: {
     ensureWidth: oc.input(z.object({ minWidth: z.number() })),
     open: oc.input(

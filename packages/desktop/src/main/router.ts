@@ -17,6 +17,7 @@ import type { StateStore } from "./features/state/state-store";
 import type { UpdaterService } from "./features/updater/service";
 
 import { contract } from "../shared/contract";
+import { orchestratorRouter } from "./features/agent-orchestrator/router";
 import { agentRouter } from "./features/agent/router";
 import { pluginsRouter } from "./features/claude-code-plugins/router";
 import { configRouter } from "./features/config/router";
@@ -70,6 +71,7 @@ export function buildRouter(pluginRouters: Contribution<AnyRouter>[]) {
     storage: storageRouter,
     updater: updaterRouter,
     utils: utilsRouter,
+    orchestrator: orchestratorRouter,
     window: {
       ensureWidth: os.window.ensureWidth.handler(({ input, context }) => {
         context.mainApp.windowManager.ensureMinWidth(input.minWidth);
