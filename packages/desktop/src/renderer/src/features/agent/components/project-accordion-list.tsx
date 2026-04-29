@@ -182,6 +182,7 @@ const SortableProjectItem = memo(function SortableProjectItem({
         ) : (
           <AccordionPrimitive.Trigger
             render={<div />}
+            nativeButton={false}
             className="flex flex-1 cursor-pointer items-center gap-2.5 px-2.5 py-1.5 max-w-[calc(100%-50px)]"
             {...attributes}
             {...listeners}

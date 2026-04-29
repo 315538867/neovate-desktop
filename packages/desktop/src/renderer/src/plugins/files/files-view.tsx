@@ -53,6 +53,264 @@ interface FilesViewProps {
 
 type FilesClient = ContractRouterClient<{ files: typeof filesContract }>;
 
+// --- View Components (pure render, no hooks) ---
+
+function FilesEmptyState({
+  resolvedTheme,
+  t,
+}: {
+  resolvedTheme: string | undefined;
+  t: ReturnType<typeof useFilesTranslation>["t"];
+}) {
+  return (
+    <div className="flex h-full flex-col p-3">
+      <h2 className="text-sm font-semibold text-muted-foreground">{t("title")}</h2>
+      <div className="flex flex-1 items-center justify-center flex-col gap-2 ">
+        <img
+          src={getEmpty2Url(resolvedTheme as "dark" | "light" | undefined)}
+          alt="Empty"
+          className="shrink-0"
+          style={{ width: 67 + "px", marginLeft: "10px" }}
+          aria-hidden
+        />
+        <p className="text-xs text-muted-foreground">{t("noProject")}</p>
+      </div>
+    </div>
+  );
+}
+
+function FilesLoadingState({ t }: { t: ReturnType<typeof useFilesTranslation>["t"] }) {
+  return (
+    <div className="flex h-full flex-col p-3">
+      <h2 className="text-sm font-semibold text-muted-foreground">{t("title")}</h2>
+      <div className="flex flex-1 items-center justify-center">
+        <p className="text-xs text-muted-foreground">
+          {t("common.loading", { ns: "translation" })}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+interface FilesNormalViewProps {
+  // File tree context
+  nodes: FileNodeItem[];
+  expandedKeys: Set<string>;
+  selectedKeys: Set<string>;
+  renameStart: (key: string) => void;
+  renameEnd: () => void;
+  renamingKey: string;
+  pendingCreation: { parentPath: string; type: "file" | "folder" } | null;
+  createStart: (type: "file" | "folder", parentPath: string) => void;
+  createEnd: () => void;
+  cancelSelect: () => void;
+  expand: (key: string) => void;
+  toggleExpand: (key: string) => void;
+  flatVisible: { node: FileNodeItem; level: number }[];
+
+  // Root creation
+  rootCreating: { type: "file" | "folder" } | null;
+  rootCreatingName: string;
+  setRootCreatingName: (name: string) => void;
+  onRootCreateFinish: () => void;
+  onRootCreateCancel: () => void;
+
+  // Root menu
+  rootMenuGroups: MenuGroup[];
+
+  // Tree item callbacks
+  onSelect: (item: FileNodeItem) => void;
+  onDelete: (item: FileNodeItem) => void;
+  onRename: (oldPath: string, newPath: string) => Promise<boolean>;
+  onCreate: (newNode: { parentPath: string; name: string; isFolder: boolean }) => void;
+  onAdd: (item: FileNodeItem) => void;
+  onCopy: (item: FileNodeItem) => void;
+  onCut: (item: FileNodeItem) => void;
+  onPaste: (targetPath: string) => void;
+  canPaste: (targetPath: string) => boolean;
+  onReveal: (item: FileNodeItem) => void;
+
+  // Clipboard
+  cutSourcePath: string | null;
+
+  // Delete dialog
+  deleteConfirmOpen: boolean;
+  onDeleteConfirmOpenChange: (open: boolean) => void;
+  itemToDelete: FileNodeItem | null;
+  onConfirmDelete: () => void;
+
+  // i18n
+  t: ReturnType<typeof useFilesTranslation>["t"];
+}
+
+function FilesNormalState({
+  nodes,
+  expandedKeys,
+  selectedKeys,
+  renameStart,
+  renameEnd,
+  renamingKey,
+  pendingCreation,
+  createStart,
+  createEnd,
+  cancelSelect,
+  expand,
+  toggleExpand,
+  flatVisible,
+  rootCreating,
+  rootCreatingName,
+  setRootCreatingName,
+  onRootCreateFinish,
+  onRootCreateCancel,
+  rootMenuGroups,
+  onSelect,
+  onDelete,
+  onRename,
+  onCreate,
+  onAdd,
+  onCopy,
+  onCut,
+  onPaste,
+  canPaste,
+  onReveal,
+  cutSourcePath,
+  deleteConfirmOpen,
+  onDeleteConfirmOpenChange,
+  itemToDelete,
+  onConfirmDelete,
+  t,
+}: FilesNormalViewProps) {
+  return (
+    <FileTreeContext.Provider
+      value={{
+        nodes,
+        expandedKeys,
+        selectedKeys,
+        renameStart,
+        renameEnd,
+        renamingKey,
+        pendingCreation,
+        createStart,
+        createEnd,
+      }}
+    >
+      <div className="flex h-full flex-col p-3 overflow-hidden">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm font-semibold text-muted-foreground">{t("title")}</h2>
+        </div>
+
+        <ContextMenu>
+          <ContextMenuTrigger
+            render={
+              <div
+                className="flex-1 flex flex-col min-h-0 -mr-2.5"
+                onClick={(e) => {
+                  // Only clear selection when clicking the empty area (not tree nodes)
+                  if (e.target === e.currentTarget) {
+                    cancelSelect();
+                  }
+                }}
+              >
+                {rootCreating && (
+                  <div className="flex items-center gap-1 px-2 py-1 hover:bg-accent hover:text-accent-foreground rounded-sm">
+                    <div className="w-4 h-4 flex items-center justify-center">
+                      <HugeiconsIcon
+                        icon={rootCreating.type === "folder" ? Folder02Icon : File02Icon}
+                        size={18}
+                        strokeWidth={1.5}
+                      />
+                    </div>
+                    <span className="flex-1 text-sm ml-2 cursor-pointer">
+                      <input
+                        type="text"
+                        placeholder={
+                          rootCreating.type === "file"
+                            ? t("newFilePlaceholder")
+                            : t("newFolderPlaceholder")
+                        }
+                        value={rootCreatingName}
+                        onChange={(e) => setRootCreatingName(e.target.value)}
+                        onBlur={onRootCreateFinish}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.stopPropagation();
+                            onRootCreateFinish();
+                          } else if (e.key === "Escape") {
+                            e.stopPropagation();
+                            onRootCreateCancel();
+                          }
+                        }}
+                        className="w-full bg-background border border-border rounded px-2 py-1"
+                        autoFocus
+                      />
+                    </span>
+                  </div>
+                )}
+                {nodes.length === 0 ? (
+                  <div className="flex items-center justify-center h-32">
+                    <p className="text-xs text-muted-foreground">{t("emptyDirectory")}</p>
+                  </div>
+                ) : (
+                  <Virtuoso
+                    data={flatVisible}
+                    increaseViewportBy={400}
+                    computeItemKey={(_, { node }) => node.fullPath}
+                    itemContent={(_, { node, level }) => (
+                      <TreeNode
+                        item={node}
+                        level={level}
+                        renderChildren={false}
+                        onExpand={expand}
+                        onToggleExpand={toggleExpand}
+                        onSelect={onSelect}
+                        onDelete={onDelete}
+                        onRename={onRename}
+                        onCreate={onCreate}
+                        onAdd={onAdd}
+                        onCopy={onCopy}
+                        onCut={onCut}
+                        onPaste={onPaste}
+                        canPaste={canPaste}
+                        onReveal={onReveal}
+                        cutSourcePath={cutSourcePath}
+                      />
+                    )}
+                    style={{ flex: 1 }}
+                  />
+                )}
+              </div>
+            }
+          />
+          <ContextMenuPopup>
+            <ContextMenuGroups groups={rootMenuGroups} />
+          </ContextMenuPopup>
+        </ContextMenu>
+
+        <AlertDialog open={deleteConfirmOpen} onOpenChange={onDeleteConfirmOpenChange}>
+          <AlertDialogPopup>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("delete.title")}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("delete.description", { name: itemToDelete?.fileName })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogClose render={<Button variant="outline" />}>
+                {t("common.cancel", { ns: "translation" })}
+              </AlertDialogClose>
+              <Button variant="destructive" onClick={onConfirmDelete}>
+                {t("common.delete", { ns: "translation" })}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogPopup>
+        </AlertDialog>
+      </div>
+    </FileTreeContext.Provider>
+  );
+}
+
+// --- State Layer (all hooks, no early returns before hooks) ---
+
 function FilesViewComponent({ project }: FilesViewProps) {
   const { t } = useFilesTranslation();
   const { orpcClient, app } = usePluginContext();
@@ -507,36 +765,32 @@ function FilesViewComponent({ project }: FilesViewProps) {
     };
   }, []); // Empty deps - listener only registered once
 
-  if (!project) {
-    return (
-      <div className="flex h-full flex-col p-3">
-        <h2 className="text-sm font-semibold text-muted-foreground">{t("title")}</h2>
-        <div className="flex flex-1 items-center justify-center flex-col gap-2 ">
-          <img
-            src={getEmpty2Url(resolvedTheme as "dark" | "light" | undefined)}
-            alt="Empty"
-            className="shrink-0"
-            style={{ width: 67 + "px", marginLeft: "10px" }}
-            aria-hidden
-          />
-          <p className="text-xs text-muted-foreground">{t("noProject")}</p>
-        </div>
-      </div>
-    );
-  }
+  // Flatten the tree into the visible rows (DFS, honoring expandedKeys).
+  // Combined with Virtuoso this turns rendering into O(visible) instead of
+  // O(N) per-node `nodes.filter(...)` recursion.
+  const childrenMap = useMemo(() => {
+    const m = new Map<string, FileNodeItem[]>();
+    for (const n of nodes) {
+      const arr = m.get(n.parentPath);
+      if (arr) arr.push(n);
+      else m.set(n.parentPath, [n]);
+    }
+    return m;
+  }, [nodes]);
 
-  if (loading) {
-    return (
-      <div className="flex h-full flex-col p-3">
-        <h2 className="text-sm font-semibold text-muted-foreground">{t("title")}</h2>
-        <div className="flex flex-1 items-center justify-center">
-          <p className="text-xs text-muted-foreground">
-            {t("common.loading", { ns: "translation" })}
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const flatVisible = useMemo(() => {
+    const out: { node: FileNodeItem; level: number }[] = [];
+    const walk = (parentPath: string, level: number) => {
+      const children = childrenMap.get(parentPath);
+      if (!children) return;
+      for (const c of children) {
+        out.push({ node: c, level });
+        if (c.isFolder && expandedKeys.has(c.fullPath)) walk(c.fullPath, level + 1);
+      }
+    };
+    walk(cwd, 0);
+    return out;
+  }, [childrenMap, expandedKeys, cwd]);
 
   const handleRootCreateFinish = async () => {
     if (rootCreatingName && rootCreating && cwd) {
@@ -585,161 +839,53 @@ function FilesViewComponent({ project }: FilesViewProps) {
 
   const rootMenuGroups = buildRootMenu();
 
-  // Flatten the tree into the visible rows (DFS, honoring expandedKeys).
-  // Combined with Virtuoso this turns rendering into O(visible) instead of
-  // O(N) per-node `nodes.filter(...)` recursion.
-  const childrenMap = useMemo(() => {
-    const m = new Map<string, FileNodeItem[]>();
-    for (const n of nodes) {
-      const arr = m.get(n.parentPath);
-      if (arr) arr.push(n);
-      else m.set(n.parentPath, [n]);
-    }
-    return m;
-  }, [nodes]);
+  // --- Render dispatch: all hooks run above unconditionally, then choose view ---
+  if (!project) {
+    return <FilesEmptyState resolvedTheme={resolvedTheme} t={t} />;
+  }
 
-  const flatVisible = useMemo(() => {
-    const out: { node: FileNodeItem; level: number }[] = [];
-    const walk = (parentPath: string, level: number) => {
-      const children = childrenMap.get(parentPath);
-      if (!children) return;
-      for (const c of children) {
-        out.push({ node: c, level });
-        if (c.isFolder && expandedKeys.has(c.fullPath)) walk(c.fullPath, level + 1);
-      }
-    };
-    walk(cwd, 0);
-    return out;
-  }, [childrenMap, expandedKeys, cwd]);
+  if (loading) {
+    return <FilesLoadingState t={t} />;
+  }
 
   return (
-    <FileTreeContext.Provider
-      value={{
-        nodes,
-        expandedKeys,
-        selectedKeys,
-        renameStart,
-        renameEnd,
-        renamingKey,
-        pendingCreation,
-        createStart,
-        createEnd,
-      }}
-    >
-      <div className="flex h-full flex-col p-3 overflow-hidden">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-semibold text-muted-foreground">{t("title")}</h2>
-        </div>
-
-        <ContextMenu>
-          <ContextMenuTrigger
-            render={
-              <div
-                className="flex-1 flex flex-col min-h-0 -mr-2.5"
-                onClick={(e) => {
-                  // Only clear selection when clicking the empty area (not tree nodes)
-                  if (e.target === e.currentTarget) {
-                    cancelSelect();
-                  }
-                }}
-              >
-                {rootCreating && (
-                  <div className="flex items-center gap-1 px-2 py-1 hover:bg-accent hover:text-accent-foreground rounded-sm">
-                    <div className="w-4 h-4 flex items-center justify-center">
-                      <HugeiconsIcon
-                        icon={rootCreating.type === "folder" ? Folder02Icon : File02Icon}
-                        size={18}
-                        strokeWidth={1.5}
-                      />
-                    </div>
-                    <span className="flex-1 text-sm ml-2 cursor-pointer">
-                      <input
-                        type="text"
-                        placeholder={
-                          rootCreating.type === "file"
-                            ? t("newFilePlaceholder")
-                            : t("newFolderPlaceholder")
-                        }
-                        value={rootCreatingName}
-                        onChange={(e) => setRootCreatingName(e.target.value)}
-                        onBlur={handleRootCreateFinish}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.stopPropagation();
-                            handleRootCreateFinish();
-                          } else if (e.key === "Escape") {
-                            e.stopPropagation();
-                            handleRootCreateCancel();
-                          }
-                        }}
-                        className="w-full bg-background border border-border rounded px-2 py-1"
-                        autoFocus
-                      />
-                    </span>
-                  </div>
-                )}
-                {nodes.length === 0 ? (
-                  <div className="flex items-center justify-center h-32">
-                    <p className="text-xs text-muted-foreground">{t("emptyDirectory")}</p>
-                  </div>
-                ) : (
-                  <Virtuoso
-                    data={flatVisible}
-                    increaseViewportBy={400}
-                    computeItemKey={(_, { node }) => node.fullPath}
-                    itemContent={(_, { node, level }) => (
-                      <TreeNode
-                        item={node}
-                        level={level}
-                        renderChildren={false}
-                        onExpand={expand}
-                        onToggleExpand={toggleExpand}
-                        onSelect={handleSelect}
-                        onDelete={handleDelete}
-                        onRename={handleRename}
-                        onCreate={handleCreate}
-                        onAdd={handleAddContext}
-                        onCopy={handleCopy}
-                        onCut={handleCut}
-                        onPaste={handlePaste}
-                        canPaste={canPaste}
-                        onReveal={handleReveal}
-                        cutSourcePath={
-                          clipboardItem?.operation === "cut" ? clipboardItem.sourcePath : null
-                        }
-                      />
-                    )}
-                    style={{ flex: 1 }}
-                  />
-                )}
-              </div>
-            }
-          />
-          <ContextMenuPopup>
-            <ContextMenuGroups groups={rootMenuGroups} />
-          </ContextMenuPopup>
-        </ContextMenu>
-
-        <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-          <AlertDialogPopup>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t("delete.title")}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {t("delete.description", { name: itemToDelete?.fileName })}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogClose render={<Button variant="outline" />}>
-                {t("common.cancel", { ns: "translation" })}
-              </AlertDialogClose>
-              <Button variant="destructive" onClick={handleConfirmDelete}>
-                {t("common.delete", { ns: "translation" })}
-              </Button>
-            </AlertDialogFooter>
-          </AlertDialogPopup>
-        </AlertDialog>
-      </div>
-    </FileTreeContext.Provider>
+    <FilesNormalState
+      nodes={nodes}
+      expandedKeys={expandedKeys}
+      selectedKeys={selectedKeys}
+      renameStart={renameStart}
+      renameEnd={renameEnd}
+      renamingKey={renamingKey}
+      pendingCreation={pendingCreation}
+      createStart={createStart}
+      createEnd={createEnd}
+      cancelSelect={cancelSelect}
+      expand={expand}
+      toggleExpand={toggleExpand}
+      flatVisible={flatVisible}
+      rootCreating={rootCreating}
+      rootCreatingName={rootCreatingName}
+      setRootCreatingName={setRootCreatingName}
+      onRootCreateFinish={handleRootCreateFinish}
+      onRootCreateCancel={handleRootCreateCancel}
+      rootMenuGroups={rootMenuGroups}
+      onSelect={handleSelect}
+      onDelete={handleDelete}
+      onRename={handleRename}
+      onCreate={handleCreate}
+      onAdd={handleAddContext}
+      onCopy={handleCopy}
+      onCut={handleCut}
+      onPaste={handlePaste}
+      canPaste={canPaste}
+      onReveal={handleReveal}
+      cutSourcePath={clipboardItem?.operation === "cut" ? clipboardItem.sourcePath : null}
+      deleteConfirmOpen={deleteConfirmOpen}
+      onDeleteConfirmOpenChange={setDeleteConfirmOpen}
+      itemToDelete={itemToDelete}
+      onConfirmDelete={handleConfirmDelete}
+      t={t}
+    />
   );
 }
 
