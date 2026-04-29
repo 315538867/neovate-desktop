@@ -5,7 +5,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { consumeEventIterator } from "@orpc/client";
 import debug from "debug";
 import { useTheme } from "next-themes";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Virtuoso } from "react-virtuoso";
 
 import type { Project } from "../../../../shared/features/project/types";
 import type { MenuGroup } from "./menu-types";
@@ -584,7 +585,32 @@ function FilesViewComponent({ project }: FilesViewProps) {
 
   const rootMenuGroups = buildRootMenu();
 
-  const rootLevelNodes = nodes.filter((i) => i.parentPath === cwd);
+  // Flatten the tree into the visible rows (DFS, honoring expandedKeys).
+  // Combined with Virtuoso this turns rendering into O(visible) instead of
+  // O(N) per-node `nodes.filter(...)` recursion.
+  const childrenMap = useMemo(() => {
+    const m = new Map<string, FileNodeItem[]>();
+    for (const n of nodes) {
+      const arr = m.get(n.parentPath);
+      if (arr) arr.push(n);
+      else m.set(n.parentPath, [n]);
+    }
+    return m;
+  }, [nodes]);
+
+  const flatVisible = useMemo(() => {
+    const out: { node: FileNodeItem; level: number }[] = [];
+    const walk = (parentPath: string, level: number) => {
+      const children = childrenMap.get(parentPath);
+      if (!children) return;
+      for (const c of children) {
+        out.push({ node: c, level });
+        if (c.isFolder && expandedKeys.has(c.fullPath)) walk(c.fullPath, level + 1);
+      }
+    };
+    walk(cwd, 0);
+    return out;
+  }, [childrenMap, expandedKeys, cwd]);
 
   return (
     <FileTreeContext.Provider
@@ -609,7 +635,7 @@ function FilesViewComponent({ project }: FilesViewProps) {
           <ContextMenuTrigger
             render={
               <div
-                className="flex-1 overflow-auto -mr-2.5"
+                className="flex-1 flex flex-col min-h-0 -mr-2.5"
                 onClick={(e) => {
                   // Only clear selection when clicking the empty area (not tree nodes)
                   if (e.target === e.currentTarget) {
@@ -657,12 +683,15 @@ function FilesViewComponent({ project }: FilesViewProps) {
                     <p className="text-xs text-muted-foreground">{t("emptyDirectory")}</p>
                   </div>
                 ) : (
-                  <div className="space-y-1">
-                    {rootLevelNodes.map((item) => (
+                  <Virtuoso
+                    data={flatVisible}
+                    increaseViewportBy={400}
+                    computeItemKey={(_, { node }) => node.fullPath}
+                    itemContent={(_, { node, level }) => (
                       <TreeNode
-                        key={item.fullPath}
-                        item={item}
-                        level={0}
+                        item={node}
+                        level={level}
+                        renderChildren={false}
                         onExpand={expand}
                         onToggleExpand={toggleExpand}
                         onSelect={handleSelect}
@@ -679,8 +708,9 @@ function FilesViewComponent({ project }: FilesViewProps) {
                           clipboardItem?.operation === "cut" ? clipboardItem.sourcePath : null
                         }
                       />
-                    ))}
-                  </div>
+                    )}
+                    style={{ flex: 1 }}
+                  />
                 )}
               </div>
             }

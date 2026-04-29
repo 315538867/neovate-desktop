@@ -4,7 +4,6 @@ import type { ClaudeCodeUIMessage } from "../../../../../shared/claude-code/type
 
 import {
   Conversation,
-  ConversationContent,
   ConversationScrollButton,
 } from "../../../components/ai-elements/conversation";
 import { MessageParts } from "../../../features/agent/components/message-parts";
@@ -207,18 +206,16 @@ const conversationMessages = [
 ] as any satisfies ClaudeCodeUIMessage[];
 
 function renderMessages(messages: ClaudeCodeUIMessage[]) {
+  const items = messages.map((message) => (
+    <MessageParts
+      key={message.id}
+      message={message}
+      renderToolPart={(_partMessage, part) => <ClaudeCodeToolUIPart part={part} />}
+    />
+  ));
   return (
     <div className="h-[32rem]">
-      <Conversation className="rounded-2xl border bg-background">
-        <ConversationContent>
-          {messages.map((message) => (
-            <MessageParts
-              key={message.id}
-              message={message}
-              renderToolPart={(_partMessage, part) => <ClaudeCodeToolUIPart part={part} />}
-            />
-          ))}
-        </ConversationContent>
+      <Conversation className="rounded-2xl border bg-background" items={items}>
         <ConversationScrollButton />
       </Conversation>
     </div>

@@ -20,6 +20,12 @@ interface TreeNodeProps {
   item: FileNodeItem;
   level: number;
   cutSourcePath?: string | null;
+  /**
+   * When false, the node skips its own recursive children rendering — the parent
+   * is responsible for rendering descendants (e.g. when a virtualized list flattens
+   * the tree). Defaults to true for backwards compatibility.
+   */
+  renderChildren?: boolean;
   onToggleExpand: (key: string) => void;
   onExpand: (key: string) => void;
   onSelect?: (item: FileNodeItem) => void;
@@ -65,6 +71,7 @@ export function TreeNode({
   canPaste,
   cutSourcePath,
   onReveal,
+  renderChildren = true,
 }: TreeNodeProps) {
   const {
     nodes,
@@ -378,7 +385,7 @@ export function TreeNode({
 
       {showCreator && renderCreator()}
 
-      {isExpanded && !!childNodes.length && (
+      {renderChildren && isExpanded && !!childNodes.length && (
         <div>
           {childNodes.map((child) => (
             <TreeNode

@@ -39,6 +39,8 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
   readonly #state: ClaudeCodeChatState;
   #streamingState: StreamingUIMessageState<ClaudeCodeUIMessage> | null = null;
   #messageIndex = -1;
+  #flushHandle: number | null = null;
+  #pendingFlush = false;
 
   #unsubscribe?: () => Promise<void>;
   #unsubscribeStore?: () => void;
@@ -107,6 +109,40 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
     }
   }
 
+  // ── Streaming flush (rAF batched) ───────────────────────────────────
+  // processUIMessageStream calls write() per delta — can be hundreds per
+  // second on long completions. Coalesce into one React commit per frame.
+
+  #scheduleFlush = () => {
+    this.#pendingFlush = true;
+    if (this.#flushHandle != null) return;
+    this.#flushHandle = requestAnimationFrame(() => {
+      this.#flushHandle = null;
+      this.#flushStreaming();
+    });
+  };
+
+  #flushStreaming = () => {
+    if (!this.#pendingFlush || !this.#streamingState) return;
+    this.#pendingFlush = false;
+    if (this.#messageIndex < 0) {
+      this.#state.pushMessage(this.#streamingState.message);
+      this.#messageIndex = this.#state.messages.length - 1;
+    } else {
+      this.#state.replaceMessage(this.#messageIndex, this.#streamingState.message);
+    }
+  };
+
+  #cancelFlush = () => {
+    if (this.#flushHandle != null) {
+      cancelAnimationFrame(this.#flushHandle);
+      this.#flushHandle = null;
+    }
+    // Note: do NOT clear #pendingFlush — callers may want to flush synchronously
+    // afterwards (e.g. on chunk.type === "finish"). dispose() handles cleanup
+    // by simply abandoning #pendingFlush along with the chat instance.
+  };
+
   // ── Event handling (subscribe channel) ──────────────────────────────
 
   async #handleMessage(message: ClaudeCodeUIEvent) {
@@ -164,14 +200,7 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
         await processUIMessageStream<ClaudeCodeUIMessage>({
           chunk: message.chunk,
           state: this.#streamingState,
-          write: () => {
-            if (this.#messageIndex < 0) {
-              this.#state.pushMessage(this.#streamingState!.message);
-              this.#messageIndex = this.#state.messages.length - 1;
-            } else {
-              this.#state.replaceMessage(this.#messageIndex, this.#streamingState!.message);
-            }
-          },
+          write: this.#scheduleFlush,
           onError: (error) => {
             this.#state.error = error instanceof Error ? error : new Error(String(error));
             this.#state.status = "error";
@@ -179,6 +208,10 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
         });
       }
       if (message.chunk.type === "finish") {
+        // Cancel any pending rAF and synchronously flush the last frame
+        // before nulling streamingState — otherwise the final delta is dropped.
+        this.#cancelFlush();
+        this.#flushStreaming();
         this.#streamingState = null;
         // Don't overwrite error status — if onError was called, keep error state
         if (this.#state.status !== "error") {
@@ -366,6 +399,7 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
 
   dispose = async () => {
     log("dispose: sessionId=%s", this.id);
+    this.#cancelFlush();
     this.#unsubscribeStore?.();
     await this.#unsubscribe?.();
   };

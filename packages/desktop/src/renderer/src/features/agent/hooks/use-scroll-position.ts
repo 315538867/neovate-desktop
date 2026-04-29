@@ -1,8 +1,9 @@
 import type { RefObject } from "react";
-import type { StickToBottomContext } from "use-stick-to-bottom";
 
 import debug from "debug";
 import { useEffect, useLayoutEffect } from "react";
+
+import type { ConversationHandle } from "../../../components/ai-elements/conversation";
 
 import { scrollPositions } from "../scroll-positions";
 
@@ -16,7 +17,7 @@ type ScrollBehavior = "smooth" | false;
  */
 export function useScrollPosition(
   sessionId: string,
-  contextRef: RefObject<StickToBottomContext | null>,
+  contextRef: RefObject<ConversationHandle | null>,
 ): { initialScrollBehavior: ScrollBehavior } {
   const savedScrollTop = scrollPositions.get(sessionId);
   const hasSavedPosition = savedScrollTop != null;
@@ -28,32 +29,30 @@ export function useScrollPosition(
       return;
     }
 
-    const el = contextRef.current?.scrollRef.current;
-    if (!el) {
-      log(
-        "restore: sid=%s FAILED (scrollRef unavailable, contextRef=%s)",
-        sessionId.slice(0, 8),
-        contextRef.current ? "set" : "null",
-      );
+    const handle = contextRef.current;
+    if (!handle) {
+      log("restore: sid=%s FAILED (handle unavailable)", sessionId.slice(0, 8));
       return;
     }
 
-    el.scrollTop = savedScrollTop;
+    handle.scrollTo(savedScrollTop);
+    const el = handle.scrollerEl();
     log(
       "restore: sid=%s scrollTop=%d (actual=%d, scrollHeight=%d, clientHeight=%d)",
       sessionId.slice(0, 8),
       savedScrollTop,
-      el.scrollTop,
-      el.scrollHeight,
-      el.clientHeight,
+      el?.scrollTop ?? -1,
+      el?.scrollHeight ?? -1,
+      el?.clientHeight ?? -1,
     );
   }, []); // only on mount
 
   // Save scroll position on scroll (debounced) and on unmount
   useEffect(() => {
-    const el = contextRef.current?.scrollRef.current;
-    if (!el) {
-      log("save-effect: sid=%s skipped (scrollRef unavailable)", sessionId.slice(0, 8));
+    const handle = contextRef.current;
+    const el = handle?.scrollerEl();
+    if (!handle || !el) {
+      log("save-effect: sid=%s skipped (scroller unavailable)", sessionId.slice(0, 8));
       return;
     }
 

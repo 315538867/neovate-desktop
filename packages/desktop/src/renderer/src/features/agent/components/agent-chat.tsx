@@ -1,14 +1,14 @@
 import type { FileUIPart } from "ai";
-import type { StickToBottomContext } from "use-stick-to-bottom";
 
 import { ArrowDown01Icon, ArrowUp01Icon, Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import debug from "debug";
 import { XIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ImageAttachment } from "../../../../../shared/features/agent/types";
+import type { ConversationHandle } from "../../../components/ai-elements/conversation";
 
 import { client } from "../../../orpc";
 import { useConfigStore } from "../../config/store";
@@ -28,7 +28,6 @@ function attachmentsToFileParts(attachments?: ImageAttachment[]): FileUIPart[] {
 }
 import {
   Conversation,
-  ConversationContent,
   ConversationScrollButton,
 } from "../../../components/ai-elements/conversation";
 import { Button } from "../../../components/ui/button";
@@ -278,9 +277,26 @@ function AgentChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }
   const hasPendingRequest = pendingRequests.length > 0;
 
   // Ref to access scroll context for smooth scrolling on new message
-  const conversationContextRef = useRef<StickToBottomContext | null>(null);
+  const conversationContextRef = useRef<ConversationHandle | null>(null);
 
   const { initialScrollBehavior } = useScrollPosition(sessionId, conversationContextRef);
+
+  const items = useMemo(
+    () =>
+      messages.map((message, i) => (
+        <MessageParts
+          key={message.id}
+          message={message}
+          isComplete={
+            (status !== "streaming" && status !== "submitted") || i !== messages.length - 1
+          }
+          renderToolPart={(_partMessage, part) => <ClaudeCodeToolUIPart part={part} />}
+          sessionId={sessionId}
+          isStreaming={status === "streaming" || status === "submitted"}
+        />
+      )),
+    [messages, status, sessionId],
+  );
 
   const handleSend = (text: string, attachments?: ImageAttachment[]) => {
     chatLog(
@@ -306,21 +322,11 @@ function AgentChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }
 
   return (
     <div className="@container/chat flex h-full flex-col">
-      <Conversation contextRef={conversationContextRef} initial={initialScrollBehavior}>
-        <ConversationContent>
-          {messages.map((message, i) => (
-            <MessageParts
-              key={message.id}
-              message={message}
-              isComplete={
-                (status !== "streaming" && status !== "submitted") || i !== messages.length - 1
-              }
-              renderToolPart={(_partMessage, part) => <ClaudeCodeToolUIPart part={part} />}
-              sessionId={sessionId}
-              isStreaming={status === "streaming" || status === "submitted"}
-            />
-          ))}
-        </ConversationContent>
+      <Conversation
+        contextRef={conversationContextRef}
+        initial={initialScrollBehavior}
+        items={items}
+      >
         <ConversationScrollButton />
       </Conversation>
       <div className="shrink-0 max-w-3xl mx-auto w-full">

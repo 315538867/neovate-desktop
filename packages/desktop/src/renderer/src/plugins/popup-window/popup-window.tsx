@@ -1,17 +1,13 @@
 import type { FileUIPart } from "ai";
-import type { StickToBottomContext } from "use-stick-to-bottom";
 
 import debug from "debug";
 import { ExternalLink, SquarePen } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ImageAttachment } from "../../../../shared/features/agent/types";
+import type { ConversationHandle } from "../../components/ai-elements/conversation";
 
-import {
-  Conversation,
-  ConversationContent,
-  ConversationScrollButton,
-} from "../../components/ai-elements/conversation";
+import { Conversation, ConversationScrollButton } from "../../components/ai-elements/conversation";
 import { Button } from "../../components/ui/button";
 import { claudeCodeChatManager } from "../../features/agent/chat-manager";
 import { MessageInput } from "../../features/agent/components/message-input";
@@ -306,7 +302,24 @@ function PopupChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }
   const { messages, status, error, pendingRequests, sendMessage, stop } =
     useClaudeCodeChat(sessionId);
   const hasPendingRequest = pendingRequests.length > 0;
-  const conversationContextRef = useRef<StickToBottomContext | null>(null);
+  const conversationContextRef = useRef<ConversationHandle | null>(null);
+
+  const items = useMemo(
+    () =>
+      messages.map((message, i) => (
+        <MessageParts
+          key={message.id}
+          message={message}
+          isComplete={
+            (status !== "streaming" && status !== "submitted") || i !== messages.length - 1
+          }
+          renderToolPart={(_partMessage, part) => <ClaudeCodeToolUIPart part={part} />}
+          sessionId={sessionId}
+          isStreaming={status === "streaming" || status === "submitted"}
+        />
+      )),
+    [messages, status, sessionId],
+  );
 
   const handleSend = useCallback(
     (text: string, attachments?: ImageAttachment[]) => {
@@ -329,21 +342,7 @@ function PopupChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }
 
   return (
     <div className="flex flex-1 flex-col min-h-0">
-      <Conversation contextRef={conversationContextRef}>
-        <ConversationContent>
-          {messages.map((message, i) => (
-            <MessageParts
-              key={message.id}
-              message={message}
-              isComplete={
-                (status !== "streaming" && status !== "submitted") || i !== messages.length - 1
-              }
-              renderToolPart={(_partMessage, part) => <ClaudeCodeToolUIPart part={part} />}
-              sessionId={sessionId}
-              isStreaming={status === "streaming" || status === "submitted"}
-            />
-          ))}
-        </ConversationContent>
+      <Conversation contextRef={conversationContextRef} items={items}>
         <ConversationScrollButton />
       </Conversation>
       <div className="shrink-0 max-w-3xl mx-auto w-full">
