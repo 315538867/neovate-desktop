@@ -15,6 +15,7 @@ import {
 } from "./components/app-layout";
 import { FullRightPanel } from "./components/app-layout/full-right-panel";
 import { AgentChat, SessionList } from "./features/agent";
+import { OrchestratorChat, useOrchestratorStore } from "./features/agent-orchestrator";
 import { CommandPalette } from "./features/command-palette/command-palette";
 import { useConfigStore } from "./features/config/store";
 import { ContentPanelRenderer } from "./features/content-panel/components/content-panel";
@@ -34,6 +35,7 @@ export default function App() {
   const showSettings = useSettingsStore((state) => state.showSettings);
   const showStats = useStatsStore((state) => state.showStats);
   const developerMode = useConfigStore((s) => s.developerMode);
+  const orchestratorMode = useOrchestratorStore((s) => s.mode);
 
   // TODO: refactor with 统一的埋点体系, replace raw CustomEvent dispatching
   useEffect(() => {
@@ -81,7 +83,7 @@ export default function App() {
         </AppLayoutTitleBar>
 
         <AppLayoutChatPanel>
-          <AgentChat />
+          {orchestratorMode === "orchestrated" ? <OrchestratorChat /> : <AgentChat />}
         </AppLayoutChatPanel>
 
         <AppLayoutPanelSeparator id="chatPanel:contentPanel" />
