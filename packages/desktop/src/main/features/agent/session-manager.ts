@@ -1317,28 +1317,47 @@ export class SessionManager {
         // On result, publish context_usage event with computed remaining %
         if (value.type === "result") {
           const modelEntries = Object.values(value.modelUsage ?? {});
-          let contextWindowSize = modelEntries[0]?.contextWindow ?? 0;
-          if (!contextWindowSize) {
-            // Non-Anthropic providers often omit contextWindow; fall back to a known map.
-            contextWindowSize = lookupContextWindow(session.model);
+          const modelUsage = modelEntries[0];
+
+          if (session.providerId) {
+            // Third-party provider: contextWindow is unreliable (SDK defaults to 200k).
+            // Publish cumulative input/output tokens from the API response instead.
+            this.eventPublisher.publish(sessionId, {
+              kind: "event",
+              event: {
+                id: randomUUID(),
+                type: "context_usage",
+                contextWindowSize: 0,
+                usedTokens: 0,
+                remainingPct: 0,
+                totalInputTokens: modelUsage?.inputTokens ?? 0,
+                totalOutputTokens: modelUsage?.outputTokens ?? 0,
+              },
+            });
+          } else {
+            let contextWindowSize = modelUsage?.contextWindow ?? 0;
+            if (!contextWindowSize) {
+              // Non-Anthropic providers often omit contextWindow; fall back to a known map.
+              contextWindowSize = lookupContextWindow(session.model);
+            }
+            const remainingPct =
+              contextWindowSize > 0
+                ? Math.max(
+                    0,
+                    Math.min(100, Math.round((1 - lastInputTokens / contextWindowSize) * 100)),
+                  )
+                : 0;
+            this.eventPublisher.publish(sessionId, {
+              kind: "event",
+              event: {
+                id: randomUUID(),
+                type: "context_usage",
+                contextWindowSize,
+                usedTokens: lastInputTokens,
+                remainingPct,
+              },
+            });
           }
-          const remainingPct =
-            contextWindowSize > 0
-              ? Math.max(
-                  0,
-                  Math.min(100, Math.round((1 - lastInputTokens / contextWindowSize) * 100)),
-                )
-              : 0;
-          this.eventPublisher.publish(sessionId, {
-            kind: "event",
-            event: {
-              id: randomUUID(),
-              type: "context_usage",
-              contextWindowSize,
-              usedTokens: lastInputTokens,
-              remainingPct,
-            },
-          });
           this.powerBlocker.onTurnEnd(sessionId);
         }
 

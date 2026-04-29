@@ -27,10 +27,17 @@ export function ContextLeft({ sessionId }: { sessionId: string }) {
   const [clicked, setClicked] = useState(false);
   const usage = useAgentStore((s) => s.sessions.get(sessionId)?.usage);
   if (!usage) return null;
-  const { remainingPct, contextUsedTokens, contextWindowSize } = usage;
+  const {
+    remainingPct,
+    contextUsedTokens,
+    contextWindowSize,
+    totalInputTokens,
+    totalOutputTokens,
+  } = usage;
   const isDegraded = !contextWindowSize;
-  if (isDegraded && !contextUsedTokens) return null;
+  if (isDegraded && !contextUsedTokens && !totalInputTokens && !totalOutputTokens) return null;
 
+  const isSummary = totalInputTokens != null || totalOutputTokens != null;
   const usedPct = 100 - remainingPct;
   const status: Status = isDegraded ? "healthy" : getStatus(remainingPct);
 
@@ -59,7 +66,11 @@ export function ContextLeft({ sessionId }: { sessionId: string }) {
           !isDegraded && status === "critical" && "text-destructive",
         )}
       >
-        {isDegraded ? `${formatTokens(contextUsedTokens)}` : `${remainingPct}%`}
+        {isSummary
+          ? formatTokens((totalInputTokens ?? 0) + (totalOutputTokens ?? 0))
+          : isDegraded
+            ? `${formatTokens(contextUsedTokens)}`
+            : `${remainingPct}%`}
       </span>
     </button>
   );
@@ -71,29 +82,46 @@ export function ContextLeft({ sessionId }: { sessionId: string }) {
         <TooltipContent side="top" align="end">
           <div className="flex flex-col gap-1 py-0.5">
             <div className="font-medium">{t("chat.context.title")}</div>
-            <div className="flex items-center justify-between gap-4 text-muted-foreground">
-              <span>{t("chat.context.used")}</span>
-              <span className="tabular-nums">{formatTokens(contextUsedTokens)} tokens</span>
-            </div>
-            {isDegraded ? (
-              <div className="text-muted-foreground">{t("chat.context.unknownTotal")}</div>
+            {isSummary ? (
+              <>
+                <div className="flex items-center justify-between gap-4 text-muted-foreground">
+                  <span>{t("chat.context.input")}</span>
+                  <span className="tabular-nums">{formatTokens(totalInputTokens ?? 0)} tokens</span>
+                </div>
+                <div className="flex items-center justify-between gap-4 text-muted-foreground">
+                  <span>{t("chat.context.output")}</span>
+                  <span className="tabular-nums">
+                    {formatTokens(totalOutputTokens ?? 0)} tokens
+                  </span>
+                </div>
+              </>
             ) : (
               <>
                 <div className="flex items-center justify-between gap-4 text-muted-foreground">
-                  <span>{t("chat.context.total")}</span>
-                  <span className="tabular-nums">{formatTokens(contextWindowSize)} tokens</span>
+                  <span>{t("chat.context.used")}</span>
+                  <span className="tabular-nums">{formatTokens(contextUsedTokens)} tokens</span>
                 </div>
-                <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted-foreground/15">
-                  <div
-                    className={cn(
-                      "h-full rounded-full transition-all",
-                      status === "healthy" && "bg-muted-foreground/50",
-                      status === "warning" && "bg-yellow-500",
-                      status === "critical" && "bg-destructive",
-                    )}
-                    style={{ width: `${usedPct}%` }}
-                  />
-                </div>
+                {isDegraded ? (
+                  <div className="text-muted-foreground">{t("chat.context.unknownTotal")}</div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between gap-4 text-muted-foreground">
+                      <span>{t("chat.context.total")}</span>
+                      <span className="tabular-nums">{formatTokens(contextWindowSize)} tokens</span>
+                    </div>
+                    <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted-foreground/15">
+                      <div
+                        className={cn(
+                          "h-full rounded-full transition-all",
+                          status === "healthy" && "bg-muted-foreground/50",
+                          status === "warning" && "bg-yellow-500",
+                          status === "critical" && "bg-destructive",
+                        )}
+                        style={{ width: `${usedPct}%` }}
+                      />
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>

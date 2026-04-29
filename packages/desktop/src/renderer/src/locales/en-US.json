@@ -595,6 +595,8 @@
   "chat.context.used": "Used",
   "chat.context.total": "Total",
   "chat.context.unknownTotal": "Total unknown",
+  "chat.context.input": "Input",
+  "chat.context.output": "Output",
 
   "chat.rewind.tooltip": "Rewind to here",
   "chat.rewind.conversationOnly": "Restore conversation only",

@@ -47,8 +47,8 @@ export type TaskState = {
 export type SessionUsage = {
   totalCostUsd: number;
   totalDurationMs: number;
-  totalInputTokens: number;
-  totalOutputTokens: number;
+  totalInputTokens?: number;
+  totalOutputTokens?: number;
   contextWindowSize: number;
   contextUsedTokens: number;
   remainingPct: number;
@@ -108,7 +108,13 @@ type AgentState = {
   setPermissionMode: (sessionId: string, mode: PermissionMode) => void;
   setSessionUsage: (
     sessionId: string,
-    usage: { contextWindowSize: number; usedTokens: number; remainingPct: number },
+    usage: {
+      contextWindowSize: number;
+      usedTokens: number;
+      remainingPct: number;
+      totalInputTokens?: number;
+      totalOutputTokens?: number;
+    },
   ) => void;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   sessionInitError: string | null;
@@ -360,7 +366,13 @@ export const useAgentStore = create<AgentState>()(
     },
 
     setSessionUsage: (sessionId, usage) => {
-      storeLog("setSessionUsage: sid=%s remaining=%d%%", sessionId, usage.remainingPct);
+      storeLog(
+        "setSessionUsage: sid=%s remaining=%d%% input=%d output=%d",
+        sessionId,
+        usage.remainingPct,
+        usage.totalInputTokens ?? 0,
+        usage.totalOutputTokens ?? 0,
+      );
       set((state) => {
         const session = state.sessions.get(sessionId);
         if (!session) return;
@@ -368,8 +380,8 @@ export const useAgentStore = create<AgentState>()(
           ...session.usage,
           totalCostUsd: session.usage?.totalCostUsd ?? 0,
           totalDurationMs: session.usage?.totalDurationMs ?? 0,
-          totalInputTokens: session.usage?.totalInputTokens ?? 0,
-          totalOutputTokens: session.usage?.totalOutputTokens ?? 0,
+          totalInputTokens: usage.totalInputTokens ?? session.usage?.totalInputTokens,
+          totalOutputTokens: usage.totalOutputTokens ?? session.usage?.totalOutputTokens,
           contextWindowSize: usage.contextWindowSize,
           contextUsedTokens: usage.usedTokens,
           remainingPct: usage.remainingPct,

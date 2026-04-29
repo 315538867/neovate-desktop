@@ -69,6 +69,8 @@ export type ContextUsageEvent = {
   contextWindowSize: number;
   usedTokens: number;
   remainingPct: number;
+  totalInputTokens?: number;
+  totalOutputTokens?: number;
 };
 
 export type ClaudeCodeUIEventPart =

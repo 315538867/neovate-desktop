@@ -597,6 +597,8 @@
   "chat.context.used": "已使用",
   "chat.context.total": "总容量",
   "chat.context.unknownTotal": "总容量未知",
+  "chat.context.input": "输入",
+  "chat.context.output": "输出",
 
   "chat.rewind.tooltip": "回退到此处",
   "chat.rewind.conversationOnly": "仅恢复对话",

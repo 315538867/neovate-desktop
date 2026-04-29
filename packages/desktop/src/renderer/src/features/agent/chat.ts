@@ -226,13 +226,13 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
 
   #handleEvent(event: ClaudeCodeUIEventMessage) {
     if (event.type === "context_usage") {
-      const { contextWindowSize, usedTokens, remainingPct } = event as ContextUsageEvent & {
-        id: string;
-      };
+      const e = event as ContextUsageEvent & { id: string };
       useAgentStore.getState().setSessionUsage(this.id, {
-        contextWindowSize,
-        usedTokens,
-        remainingPct,
+        contextWindowSize: e.contextWindowSize,
+        usedTokens: e.usedTokens,
+        remainingPct: e.remainingPct,
+        totalInputTokens: e.totalInputTokens,
+        totalOutputTokens: e.totalOutputTokens,
       });
     } else if (event.type === "prompt_suggestion") {
       const suggestion = (event as { suggestion: string }).suggestion;
