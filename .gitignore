@@ -18,3 +18,4 @@ packages/desktop/vendor/rtk/
 .zcf/
 /tmp
 *CLAUDE.md
+.spec-workflow/*
