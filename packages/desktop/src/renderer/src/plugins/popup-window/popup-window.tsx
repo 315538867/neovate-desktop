@@ -1,10 +1,8 @@
-import type { FileUIPart } from "ai";
-
 import debug from "debug";
 import { ExternalLink, SquarePen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { ImageAttachment } from "../../../../shared/features/agent/types";
+import type { FileAttachment } from "../../../../shared/features/agent/types";
 import type { ConversationHandle } from "../../components/ai-elements/conversation";
 
 import { Conversation, ConversationScrollButton } from "../../components/ai-elements/conversation";
@@ -18,6 +16,7 @@ import { ClaudeCodeToolUIPart } from "../../features/agent/components/tool-parts
 import { useClaudeCodeChat } from "../../features/agent/hooks/use-claude-code-chat";
 import { registerSessionInStore } from "../../features/agent/session-utils";
 import { useAgentStore } from "../../features/agent/store";
+import { attachmentsToFileParts } from "../../features/agent/utils/attachments-to-file-parts";
 import { useConfigStore } from "../../features/config/store";
 import { useProjectStore } from "../../features/project/store";
 import { postCrossWindowMessage } from "../../lib/cross-window-channel";
@@ -25,16 +24,6 @@ import { cn } from "../../lib/utils";
 import { usePopupWindowTranslation } from "./i18n";
 
 const log = debug("neovate:popup-window");
-
-function attachmentsToFileParts(attachments?: ImageAttachment[]): FileUIPart[] {
-  if (!attachments || attachments.length === 0) return [];
-  return attachments.map((a) => ({
-    type: "file" as const,
-    mediaType: a.mediaType,
-    filename: a.filename,
-    url: `data:${a.mediaType};base64,${a.base64}`,
-  }));
-}
 
 export default function PopupWindow() {
   const { t } = usePopupWindowTranslation();
@@ -252,7 +241,7 @@ function PopupInputMode({
   const activeSessionId = useAgentStore((s) => s.activeSessionId);
 
   const handleSend = useCallback(
-    (message: string, attachments?: ImageAttachment[]) => {
+    (message: string, attachments?: FileAttachment[]) => {
       if (!activeSessionId) return;
       log("sending message: sessionId=%s", activeSessionId.slice(0, 8));
 
@@ -322,7 +311,7 @@ function PopupChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }
   );
 
   const handleSend = useCallback(
-    (text: string, attachments?: ImageAttachment[]) => {
+    (text: string, attachments?: FileAttachment[]) => {
       log("follow-up: sessionId=%s", sessionId.slice(0, 8));
       const files = attachmentsToFileParts(attachments);
       sendMessage({

@@ -1215,9 +1215,29 @@ export class SessionManager {
         };
       });
 
+    const pdfBlocks = message.parts
+      .filter(
+        (p): p is { type: "file"; mediaType: string; url: string } =>
+          p.type === "file" &&
+          typeof (p as any).mediaType === "string" &&
+          (p as any).mediaType === "application/pdf",
+      )
+      .map((p) => {
+        const base64 = p.url.startsWith("data:") ? p.url.split(",")[1] : p.url;
+        return {
+          type: "document" as const,
+          source: {
+            type: "base64" as const,
+            media_type: "application/pdf" as const,
+            data: base64,
+          },
+        };
+      });
+
+    const mediaBlocks = [...imageBlocks, ...pdfBlocks];
     const content =
-      imageBlocks.length > 0
-        ? [...(text ? [{ type: "text" as const, text }] : []), ...imageBlocks]
+      mediaBlocks.length > 0
+        ? [...(text ? [{ type: "text" as const, text }] : []), ...mediaBlocks]
         : text;
 
     // Pre-turn snapshot: capture working tree state before Claude modifies files

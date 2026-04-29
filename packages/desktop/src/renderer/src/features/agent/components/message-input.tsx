@@ -7,7 +7,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { ImageAttachment, PermissionMode } from "../../../../../shared/features/agent/types";
+import type { FileAttachment, PermissionMode } from "../../../../../shared/features/agent/types";
 
 import { toastManager } from "../../../components/ui/toast";
 import { useEventCallback } from "../../../hooks/use-event-callback";
@@ -33,7 +33,7 @@ import { createSlashCommandsExtension } from "./slash-commands-extension";
 const log = debug("neovate:message-input");
 
 type Props = {
-  onSend: (message: string, attachments?: ImageAttachment[]) => void;
+  onSend: (message: string, attachments?: FileAttachment[]) => void;
   onCancel: () => void;
   streaming: boolean;
   disabled?: boolean;
@@ -50,7 +50,7 @@ const NEW_CHAT_EASTER_EGGS = new Set(["exit", "quit", ":q", ":q!", ":wq", ":wq!"
 
 type SessionDraft = {
   content: JSONContent;
-  attachments: ImageAttachment[];
+  attachments: FileAttachment[];
 };
 
 const sessionDrafts = new Map<string, SessionDraft>();
@@ -117,19 +117,19 @@ export function MessageInput({
     });
   });
 
-  const [attachments, setAttachments] = useState<ImageAttachment[]>(() =>
+  const [attachments, setAttachments] = useState<FileAttachment[]>(() =>
     activeSessionId ? (sessionDrafts.get(activeSessionId)?.attachments ?? []) : [],
   );
   const attachmentsRef = useLatestRef(attachments);
 
-  const addAttachments = useCallback((images: ImageAttachment[]) => {
+  const addAttachments = useCallback((files: FileAttachment[]) => {
     log(
-      "addAttachments: adding %d images, ids=%o",
-      images.length,
-      images.map((i) => i.id),
+      "addAttachments: adding %d files, ids=%o",
+      files.length,
+      files.map((f) => f.id),
     );
     setAttachments((prev) => {
-      const next = [...prev, ...images];
+      const next = [...prev, ...files];
       log("addAttachments: total attachments now=%d", next.length);
       return next;
     });
@@ -338,27 +338,46 @@ export function MessageInput({
 
   const send = useEventCallback(() => {
     if (!editor || streaming) return;
-    const text = extractText(editor.getJSON());
-    const imgs = attachmentsRef.current;
+    let text = extractText(editor.getJSON());
+    const allAttachments = attachmentsRef.current;
     log(
-      "send: text=%s attachmentsRef.current.length=%d ids=%o",
+      "send: text=%s attachments.length=%d ids=%o",
       text.slice(0, 50),
-      imgs.length,
-      imgs.map((i) => i.id),
+      allAttachments.length,
+      allAttachments.map((a) => a.id),
     );
-    if (imgs.length > 0) {
+    if (allAttachments.length > 0) {
       log(
         "send: attachment details: %o",
-        imgs.map((i) => ({
-          id: i.id,
-          filename: i.filename,
-          mediaType: i.mediaType,
-          base64Len: i.base64?.length ?? 0,
+        allAttachments.map((a) => ({
+          id: a.id,
+          filename: a.filename,
+          category: a.category,
+          mediaType: a.mediaType,
+          base64Len: a.base64?.length ?? 0,
+          textLen: a.textContent?.length ?? 0,
         })),
       );
     }
-    if (!text && imgs.length === 0) return;
-    onSend(text, imgs.length > 0 ? imgs : undefined);
+
+    if (!text && allAttachments.length === 0) return;
+
+    // Inline text-file content as markdown code fences
+    const textAttachments = allAttachments.filter((a) => a.category === "text");
+    const mediaAttachments = allAttachments.filter((a) => a.category !== "text");
+
+    if (textAttachments.length > 0) {
+      const codeBlocks = textAttachments
+        .map((a) => {
+          const ext = a.filename.split(".").pop() ?? "";
+          const content = a.textContent ?? "";
+          return `\`\`\`${ext} filename=${a.filename}\n${content}\n\`\`\``;
+        })
+        .join("\n\n");
+      text = text ? `${text}\n\n${codeBlocks}` : codeBlocks;
+    }
+
+    onSend(text, mediaAttachments.length > 0 ? mediaAttachments : undefined);
     editor.commands.clearContent();
     setAttachments([]);
     if (activeSessionId) sessionDrafts.delete(activeSessionId);
@@ -456,10 +475,10 @@ export function MessageInput({
       const files = e.target.files;
       log("handleFileSelect: files=%d", files?.length ?? 0);
       if (!files || files.length === 0) return;
-      const imageFiles = Array.from(files).filter((f) => f.type.startsWith("image/"));
-      log("handleFileSelect: imageFiles=%d", imageFiles.length);
-      if (imageFiles.length === 0) return;
-      Promise.all(imageFiles.map(readFileAsAttachment)).then(addAttachments);
+      const acceptedFiles = Array.from(files);
+      log("handleFileSelect: accepted=%d", acceptedFiles.length);
+      if (acceptedFiles.length === 0) return;
+      Promise.all(acceptedFiles.map(readFileAsAttachment)).then(addAttachments);
       e.target.value = "";
     },
     [addAttachments],
@@ -470,7 +489,7 @@ export function MessageInput({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.pdf,.txt,.md,.json,.ts,.tsx,.js,.jsx,.py,.go,.rs,.yaml,.yml,.toml,.xml,.html,.css,.scss,.sh,.bash,.sql,.csv,.log,.env,.gitignore"
         multiple
         className="hidden"
         aria-label={t("chat.attachImages")}

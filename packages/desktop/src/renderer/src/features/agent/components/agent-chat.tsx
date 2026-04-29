@@ -1,5 +1,3 @@
-import type { FileUIPart } from "ai";
-
 import { ArrowDown01Icon, ArrowUp01Icon, Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import debug from "debug";
@@ -7,25 +5,17 @@ import { XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { ImageAttachment } from "../../../../../shared/features/agent/types";
+import type { FileAttachment } from "../../../../../shared/features/agent/types";
 import type { ConversationHandle } from "../../../components/ai-elements/conversation";
 
 import { client } from "../../../orpc";
 import { useConfigStore } from "../../config/store";
 import { useProjectStore } from "../../project/store";
 import { useAgentStore } from "../store";
+import { attachmentsToFileParts } from "../utils/attachments-to-file-parts";
 
 const chatLog = debug("neovate:agent-chat");
 
-function attachmentsToFileParts(attachments?: ImageAttachment[]): FileUIPart[] {
-  if (!attachments || attachments.length === 0) return [];
-  return attachments.map((a) => ({
-    type: "file" as const,
-    mediaType: a.mediaType,
-    filename: a.filename,
-    url: `data:${a.mediaType};base64,${a.base64}`,
-  }));
-}
 import {
   Conversation,
   ConversationScrollButton,
@@ -200,7 +190,7 @@ export function AgentChat() {
       });
   }, [activeProjectPath, createNewSession, setSessionInitError]);
 
-  const handleSend = (message: string, attachments?: ImageAttachment[]) => {
+  const handleSend = (message: string, attachments?: FileAttachment[]) => {
     chatLog(
       "handleSend: sessionId=%s msgLen=%d attachments=%d",
       activeSessionId?.slice(0, 8) ?? "new",
@@ -298,7 +288,7 @@ function AgentChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }
     [messages, status, sessionId],
   );
 
-  const handleSend = (text: string, attachments?: ImageAttachment[]) => {
+  const handleSend = (text: string, attachments?: FileAttachment[]) => {
     chatLog(
       "handleSend: sessionId=%s msgLen=%d attachments=%d",
       sessionId.slice(0, 8),

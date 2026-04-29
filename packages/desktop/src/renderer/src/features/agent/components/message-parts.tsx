@@ -191,6 +191,18 @@ function isImageFilePart(part: unknown): part is ImageFilePart {
   );
 }
 
+function isNonImageFilePart(part: unknown): part is ImageFilePart {
+  return (
+    typeof part === "object" &&
+    part !== null &&
+    "type" in part &&
+    part.type === "file" &&
+    "mediaType" in part &&
+    typeof part.mediaType === "string" &&
+    !part.mediaType.startsWith("image/")
+  );
+}
+
 export const MessagePartRenderer = memo(
   ({
     message,
@@ -208,11 +220,12 @@ export const MessagePartRenderer = memo(
     isStreaming?: boolean;
   }) => {
     const markdownComponents = useMarkdownComponents();
-    const { lastTextIndex, firstImageIndex, imageFileParts } = useMemo(() => {
+    const { lastTextIndex, firstImageIndex, imageFileParts, nonImageFileParts } = useMemo(() => {
       return {
         lastTextIndex: message.parts.findLastIndex((p) => p.type === "text"),
         firstImageIndex: message.parts.findIndex(isImageFilePart),
         imageFileParts: message.parts.filter(isImageFilePart),
+        nonImageFileParts: message.parts.filter(isNonImageFilePart),
       };
     }, [message.parts]);
 
@@ -299,7 +312,7 @@ export const MessagePartRenderer = memo(
                 if (index !== firstImageIndex) return null;
                 return (
                   <div
-                    key={`${message.id}-images`}
+                    key={`${message.id}-files`}
                     className={cn(
                       "flex flex-wrap gap-1.5",
                       message.role === "user" && "justify-end",
@@ -312,6 +325,16 @@ export const MessagePartRenderer = memo(
                         alt={img.filename ?? ""}
                         className="h-20 w-20 rounded-lg object-cover ring-1 ring-border/50"
                       />
+                    ))}
+                    {nonImageFileParts.map((f, i) => (
+                      <div
+                        key={`${message.id}-file-${i}`}
+                        className="flex items-center gap-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs"
+                      >
+                        <span className="truncate max-w-[180px] text-muted-foreground">
+                          {f.filename ?? "file"}
+                        </span>
+                      </div>
                     ))}
                   </div>
                 );

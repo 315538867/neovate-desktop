@@ -1,11 +1,11 @@
-import { X } from "lucide-react";
+import { FileTextIcon, FileIcon, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 
-import type { ImageAttachment } from "../../../../../shared/features/agent/types";
+import type { FileAttachment } from "../../../../../shared/features/agent/types";
 
 type Props = {
-  attachments: ImageAttachment[];
+  attachments: FileAttachment[];
   onRemove: (id: string) => void;
 };
 
@@ -26,11 +26,24 @@ export function AttachmentPreview({ attachments, onRemove }: Props) {
             transition={{ duration: 0.15 }}
             className="group relative"
           >
-            <img
-              src={`data:${att.mediaType};base64,${att.base64}`}
-              alt={att.filename}
-              className="h-20 w-20 rounded-lg object-cover ring-1 ring-border/50"
-            />
+            {att.category === "image" && att.base64 ? (
+              <img
+                src={`data:${att.mediaType};base64,${att.base64}`}
+                alt={att.filename}
+                className="h-20 w-20 rounded-lg object-cover ring-1 ring-border/50"
+              />
+            ) : (
+              <div className="flex h-20 w-20 flex-col items-center justify-center gap-1 rounded-lg bg-background p-1 ring-1 ring-border/50">
+                {att.category === "text" ? (
+                  <FileTextIcon className="h-7 w-7 text-muted-foreground" />
+                ) : (
+                  <FileIcon className="h-7 w-7 text-muted-foreground" />
+                )}
+                <span className="w-full truncate px-1 text-center text-[9px] leading-tight text-muted-foreground">
+                  {att.filename}
+                </span>
+              </div>
+            )}
             <button
               type="button"
               aria-label={t("chat.removeAttachment", { filename: att.filename })}

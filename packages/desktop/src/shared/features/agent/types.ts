@@ -81,13 +81,20 @@ export type McpSetServersResult = {
   errors: Record<string, string>;
 };
 
-/** Image attachment sent alongside a prompt */
-export type ImageAttachment = {
+/** File attachment sent alongside a prompt */
+export type FileAttachment = {
   id: string;
   filename: string;
   mediaType: string;
-  base64: string;
+  base64?: string;
+  /** Text content for text/* files — inlined into the message */
+  textContent?: string;
+  /** Discriminates preview UI and send behavior */
+  category: "image" | "text" | "pdf";
 };
+
+/** @deprecated Use FileAttachment instead */
+export type ImageAttachment = FileAttachment;
 
 export type SlashCommandInfo = { name: string; description?: string; argumentHint?: string };
 
