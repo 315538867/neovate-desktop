@@ -347,8 +347,11 @@ export class BrowserWindowManager implements IBrowserWindowManager {
     const [currentWidth, currentHeight] = mainWindow.getSize();
     const [, currentMinHeight] = mainWindow.getMinimumSize();
     mainWindow.setMinimumSize(capped, currentMinHeight);
-    if (currentWidth < capped) {
-      mainWindow.setSize(capped, currentHeight);
+    // Only force-resize when below absolute minimum to avoid aggressive
+    // window expansion (e.g. when a panel opens and triggers a large minWidth).
+    // The minimum size constraint prevents the user from shrinking below capped.
+    if (currentWidth < MAIN_WINDOW_MIN_WIDTH) {
+      mainWindow.setSize(MAIN_WINDOW_MIN_WIDTH, currentHeight);
     }
   }
 

@@ -777,7 +777,7 @@ export class SessionManager {
 
     const result: SessionInfo[] = sessions.map((s) => ({
       sessionId: s.sessionId,
-      title: s.customTitle ?? s.summary ?? s.firstPrompt?.slice(0, 50),
+      title: s.customTitle ?? s.summary ?? s.firstPrompt?.slice(0, 50) ?? "New Session",
       cwd: s.cwd,
       updatedAt: new Date(s.lastModified).toISOString(),
       createdAt: (birthtimeMap.get(s.sessionId) ?? new Date(s.lastModified)).toISOString(),
