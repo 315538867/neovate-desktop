@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import git from "simple-git";
 
@@ -47,7 +47,7 @@ export async function getFileDiff(cwd: string, relPath: string, diffType: "stage
       }
     } else {
       try {
-        newContent = fs.readFileSync(absoluteFile, "utf8");
+        newContent = await readFile(absoluteFile, "utf8");
       } catch {
         newContent = "";
       }

@@ -284,7 +284,7 @@ export const providerRouter = os.provider.router({
     return runBenchmark({ id: "_check", baseURL, apiKey } as Provider, modelId, signal);
   }),
 
-  setSelection: os.provider.setSelection.handler(({ input, context }) => {
+  setSelection: os.provider.setSelection.handler(async ({ input, context }) => {
     const { sessionId, providerId, model, scope } = input;
     const cwd = context.sessionManager.getSessionCwd(sessionId);
     log(
@@ -296,7 +296,7 @@ export const providerRouter = os.provider.router({
     );
 
     // Write provider setting
-    writeProviderSetting(
+    await writeProviderSetting(
       scope,
       providerId,
       { sessionId, cwd },
@@ -314,7 +314,7 @@ export const providerRouter = os.provider.router({
     }
 
     // Re-read effective values
-    const effectiveProvider = readProviderSetting(
+    const effectiveProvider = await readProviderSetting(
       sessionId,
       cwd,
       context.configStore,
@@ -325,7 +325,7 @@ export const providerRouter = os.provider.router({
       | undefined;
 
     if (effectiveProvider) {
-      const pm = readProviderModelSetting(
+      const pm = await readProviderModelSetting(
         sessionId,
         cwd,
         effectiveProvider.provider,

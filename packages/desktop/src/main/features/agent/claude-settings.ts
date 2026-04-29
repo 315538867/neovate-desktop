@@ -1,5 +1,5 @@
 import debug from "debug";
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -18,18 +18,19 @@ function sessionConfigPath(sessionId: string): string {
   return join(SESSIONS_DIR, `${sessionId}.json`);
 }
 
-function readJsonFile(filePath: string): Record<string, unknown> | undefined {
+async function readJsonFile(filePath: string): Promise<Record<string, unknown> | undefined> {
   try {
-    return JSON.parse(readFileSync(filePath, "utf-8"));
+    const content = await readFile(filePath, "utf-8");
+    return JSON.parse(content);
   } catch {
     return undefined;
   }
 }
 
-function writeJsonFile(filePath: string, data: Record<string, unknown>): void {
+async function writeJsonFile(filePath: string, data: Record<string, unknown>): Promise<void> {
   const dir = join(filePath, "..");
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", "utf-8");
+  await mkdir(dir, { recursive: true });
+  await writeFile(filePath, JSON.stringify(data, null, 2) + "\n", "utf-8");
 }
 
 /**
@@ -39,26 +40,26 @@ function writeJsonFile(filePath: string, data: Record<string, unknown>): void {
  *   2. <cwd>/.claude/settings.local.json             (project-scoped)
  *   3. ~/.claude/settings.json                       (global)
  */
-export function readModelSetting(
+export async function readModelSetting(
   sessionId: string,
   cwd: string,
-): { model: string; scope: ModelScope } | undefined {
+): Promise<{ model: string; scope: ModelScope } | undefined> {
   // 1. Session-scoped
-  const sessionJson = readJsonFile(sessionConfigPath(sessionId));
+  const sessionJson = await readJsonFile(sessionConfigPath(sessionId));
   if (typeof sessionJson?.model === "string" && sessionJson.model) {
     log("readModelSetting: session scope model=%s sid=%s", sessionJson.model, sessionId);
     return { model: sessionJson.model, scope: "session" };
   }
 
   // 2. Project-scoped
-  const projectJson = readJsonFile(join(cwd, ".claude", "settings.local.json"));
+  const projectJson = await readJsonFile(join(cwd, ".claude", "settings.local.json"));
   if (typeof projectJson?.model === "string" && projectJson.model) {
     log("readModelSetting: project scope model=%s cwd=%s", projectJson.model, cwd);
     return { model: projectJson.model, scope: "project" };
   }
 
   // 3. Global
-  const globalJson = readJsonFile(join(homedir(), ".claude", "settings.json"));
+  const globalJson = await readJsonFile(join(homedir(), ".claude", "settings.json"));
   // "default" is not a real model ID — ignore it (same as unset)
   if (typeof globalJson?.model === "string" && globalJson.model && globalJson.model !== "default") {
     log("readModelSetting: global scope model=%s", globalJson.model);
@@ -72,45 +73,45 @@ export function readModelSetting(
  * Write (or remove) a model setting at the given scope.
  * Pass `null` to remove the model key (e.g. "Clear session override").
  */
-export function writeModelSetting(
+export async function writeModelSetting(
   scope: ModelScope,
   model: string | null,
   opts: { sessionId?: string; cwd?: string },
-): void {
+): Promise<void> {
   switch (scope) {
     case "session": {
       if (!opts.sessionId) throw new Error("sessionId required for session scope");
       const filePath = sessionConfigPath(opts.sessionId);
       if (model === null) {
         try {
-          unlinkSync(filePath);
+          await unlink(filePath);
           log("writeModelSetting: removed session config sid=%s", opts.sessionId);
         } catch {
           // File didn't exist — no-op
         }
         return;
       }
-      const existing = readJsonFile(filePath) ?? {};
-      writeJsonFile(filePath, { ...existing, model });
+      const existing = (await readJsonFile(filePath)) ?? {};
+      await writeJsonFile(filePath, { ...existing, model });
       log("writeModelSetting: session scope model=%s sid=%s", model, opts.sessionId);
       break;
     }
     case "project": {
       if (!opts.cwd) throw new Error("cwd required for project scope");
       const filePath = join(opts.cwd, ".claude", "settings.local.json");
-      const existing = readJsonFile(filePath) ?? {};
+      const existing = (await readJsonFile(filePath)) ?? {};
       if (model === null) {
         delete existing.model;
       } else {
         existing.model = model;
       }
-      writeJsonFile(filePath, existing);
+      await writeJsonFile(filePath, existing);
       log("writeModelSetting: project scope model=%s cwd=%s", model, opts.cwd);
       break;
     }
     case "global": {
       const filePath = join(homedir(), ".claude", "settings.json");
-      const existing = readJsonFile(filePath) ?? {};
+      const existing = (await readJsonFile(filePath)) ?? {};
       // "default" is the SDK alias for "use default model" — not a real model ID.
       // Writing it to settings.json breaks Claude Code CLI.
       const effectiveModel = model === "default" ? null : model;
@@ -119,7 +120,7 @@ export function writeModelSetting(
       } else {
         existing.model = effectiveModel;
       }
-      writeJsonFile(filePath, existing);
+      await writeJsonFile(filePath, existing);
       log("writeModelSetting: global scope model=%s", effectiveModel);
       break;
     }
@@ -131,14 +132,14 @@ export function writeModelSetting(
  * Priority: session -> project -> global.
  * Skips nonexistent or disabled providers.
  */
-export function readProviderSetting(
+export async function readProviderSetting(
   sessionId: string,
   cwd: string,
   configStore: ConfigStore,
   projectStore: ProjectStore,
-): { provider: Provider; scope: ModelScope } | undefined {
+): Promise<{ provider: Provider; scope: ModelScope } | undefined> {
   // 1. Session-scoped
-  const sessionJson = readJsonFile(sessionConfigPath(sessionId));
+  const sessionJson = await readJsonFile(sessionConfigPath(sessionId));
   if (typeof sessionJson?.provider === "string" && sessionJson.provider) {
     const p = configStore.getProvider(sessionJson.provider);
     if (p?.enabled) {
@@ -173,24 +174,24 @@ export function readProviderSetting(
 /**
  * Write (or remove) a provider selection at the given scope.
  */
-export function writeProviderSetting(
+export async function writeProviderSetting(
   scope: ModelScope,
   providerId: string | null,
   opts: { sessionId?: string; cwd?: string },
   configStore: ConfigStore,
   projectStore: ProjectStore,
-): void {
+): Promise<void> {
   switch (scope) {
     case "session": {
       if (!opts.sessionId) throw new Error("sessionId required for session scope");
       const filePath = sessionConfigPath(opts.sessionId);
-      const existing = readJsonFile(filePath) ?? {};
+      const existing = (await readJsonFile(filePath)) ?? {};
       if (providerId === null) {
         delete existing.provider;
       } else {
         existing.provider = providerId;
       }
-      writeJsonFile(filePath, existing);
+      await writeJsonFile(filePath, existing);
       log("writeProviderSetting: session scope provider=%s sid=%s", providerId, opts.sessionId);
       break;
     }
@@ -213,17 +214,17 @@ export function writeProviderSetting(
  * Priority: session model -> project model -> global model -> provider.modelMap.model
  * Falls back to modelMap.model if resolved model is not in provider's catalog.
  */
-export function readProviderModelSetting(
+export async function readProviderModelSetting(
   sessionId: string,
   cwd: string,
   provider: Provider,
   configStore: ConfigStore,
   projectStore: ProjectStore,
-): { model: string; scope: ModelScope } {
+): Promise<{ model: string; scope: ModelScope }> {
   const fallback = provider.modelMap.model ?? Object.keys(provider.models)[0];
 
   // 1. Session-scoped model
-  const sessionJson = readJsonFile(sessionConfigPath(sessionId));
+  const sessionJson = await readJsonFile(sessionConfigPath(sessionId));
   if (typeof sessionJson?.model === "string" && sessionJson.model) {
     const model = sessionJson.model in provider.models ? sessionJson.model : fallback;
     return { model, scope: "session" };

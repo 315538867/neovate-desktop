@@ -1,5 +1,5 @@
 import debug from "debug";
-import fs from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import git from "simple-git";
 
@@ -605,7 +605,7 @@ async function getBranchFileDiff(cwd: string, file: string) {
 
   // Read from working tree to include uncommitted changes
   try {
-    newContent = fs.readFileSync(path.resolve(cwd, file), "utf8");
+    newContent = await readFile(path.resolve(cwd, file), "utf8");
   } catch {
     // deleted file on branch
     newContent = "";

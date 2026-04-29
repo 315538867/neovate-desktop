@@ -200,7 +200,7 @@ export const agentRouter = os.agent.router({
     return { path: filePath };
   }),
 
-  setModelSetting: os.agent.setModelSetting.handler(({ input, context }) => {
+  setModelSetting: os.agent.setModelSetting.handler(async ({ input, context }) => {
     const { sessionId, model, scope } = input;
     const cwd = context.sessionManager.getSessionCwd(sessionId);
     agentLog(
@@ -210,14 +210,14 @@ export const agentRouter = os.agent.router({
       scope,
       cwd,
     );
-    writeModelSetting(scope, model, { sessionId, cwd });
+    await writeModelSetting(scope, model, { sessionId, cwd });
     // setModelSetting is only called for SDK Default — clear any provider at this scope
     if (scope === "project") {
       context.projectStore.setProjectSelection(cwd, null, null);
     } else if (scope === "global") {
       context.configStore.setGlobalSelection(null, null);
     }
-    const effective = readModelSetting(sessionId, cwd);
+    const effective = await readModelSetting(sessionId, cwd);
     return { currentModel: effective?.model, modelScope: effective?.scope };
   }),
 });

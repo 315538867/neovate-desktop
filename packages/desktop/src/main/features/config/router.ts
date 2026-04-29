@@ -40,17 +40,17 @@ export const configRouter = os.config.router({
     return {};
   }),
 
-  setGlobalModelSelection: os.config.setGlobalModelSelection.handler(({ input, context }) => {
+  setGlobalModelSelection: os.config.setGlobalModelSelection.handler(async ({ input, context }) => {
     const { providerId, model } = input;
     log("setGlobalModelSelection: providerId=%s model=%s", providerId, model);
     if (providerId) {
       // Provider mode: store in configStore, clear SDK Default model
       context.configStore.setGlobalSelection(providerId, model);
-      writeModelSetting("global", null, {});
+      await writeModelSetting("global", null, {});
     } else {
       // SDK Default mode: clear provider from configStore, write model to ~/.claude/settings.json
       context.configStore.setGlobalSelection(null, null);
-      writeModelSetting("global", model, {});
+      await writeModelSetting("global", model, {});
     }
   }),
 

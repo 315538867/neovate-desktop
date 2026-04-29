@@ -11,8 +11,7 @@ import { EventPublisher } from "@orpc/server";
 import debug from "debug";
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readdirSync, statSync } from "node:fs";
-import { appendFile, copyFile, mkdir, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -43,6 +42,7 @@ import type { ConfigStore } from "../config/config-store";
 import type { ProjectStore } from "../project/project-store";
 import type { RequestTracker } from "./request-tracker";
 
+import { lookupContextWindow } from "../../../shared/claude-code/model-context-windows";
 import { APP_DATA_DIR } from "../../core/app-paths";
 import { PowerBlockerService } from "../../core/power-blocker-service";
 import { shellEnvService } from "../../core/shell-service";
@@ -62,30 +62,32 @@ const log = debug("neovate:session-manager");
 const rtkLog = debug("neovate:rtk");
 
 /** List .jsonl files one level deep under `~/.claude/projects/` */
-function listSessionFiles(filter?: string): string[] {
+async function listSessionFiles(filter?: string): Promise<string[]> {
   const baseDir = path.join(homedir(), ".claude", "projects");
   let dirs: string[];
   try {
-    dirs = readdirSync(baseDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name);
+    const entries = await readdir(baseDir, { withFileTypes: true });
+    dirs = entries.filter((d) => d.isDirectory()).map((d) => d.name);
   } catch {
     return [];
   }
-  const results: string[] = [];
-  for (const dir of dirs) {
-    try {
-      const files = readdirSync(path.join(baseDir, dir));
-      for (const f of files) {
-        if (filter ? f === filter : f.endsWith(".jsonl")) {
-          results.push(path.join(baseDir, dir, f));
+  const perDir = await Promise.all(
+    dirs.map(async (dir) => {
+      try {
+        const files = await readdir(path.join(baseDir, dir));
+        const matched: string[] = [];
+        for (const f of files) {
+          if (filter ? f === filter : f.endsWith(".jsonl")) {
+            matched.push(path.join(baseDir, dir, f));
+          }
         }
+        return matched;
+      } catch {
+        return [];
       }
-    } catch {
-      // ignore unreadable dirs
-    }
-  }
-  return results;
+    }),
+  );
+  return perDir.flat();
 }
 
 /** Timeout for SDK initializationResult() to prevent hanging sessions. */
@@ -286,7 +288,7 @@ export class SessionManager {
       }
     }
     if (explicitProviderId === undefined && !provider) {
-      const providerSetting = readProviderSetting(
+      const providerSetting = await readProviderSetting(
         sessionId,
         cwd,
         this.configStore,
@@ -308,7 +310,7 @@ export class SessionManager {
     } else if (explicitProviderId === null) {
       // Let SDK use its own defaults
     } else if (provider) {
-      modelSetting = readProviderModelSetting(
+      modelSetting = await readProviderModelSetting(
         sessionId,
         cwd,
         provider,
@@ -316,7 +318,7 @@ export class SessionManager {
         this.projectStore,
       );
     } else {
-      modelSetting = readModelSetting(sessionId, cwd);
+      modelSetting = await readModelSetting(sessionId, cwd);
     }
 
     log(
@@ -354,7 +356,7 @@ export class SessionManager {
     providerId?: string;
   }> {
     // Resolve provider
-    const providerSetting = readProviderSetting(
+    const providerSetting = await readProviderSetting(
       sessionId,
       cwd,
       this.configStore,
@@ -368,8 +370,14 @@ export class SessionManager {
 
     // Read persisted model setting before initializing SDK query
     const modelSetting = provider
-      ? readProviderModelSetting(sessionId, cwd, provider, this.configStore, this.projectStore)
-      : readModelSetting(sessionId, cwd);
+      ? await readProviderModelSetting(
+          sessionId,
+          cwd,
+          provider,
+          this.configStore,
+          this.projectStore,
+        )
+      : await readModelSetting(sessionId, cwd);
 
     const capabilities = await this.initSessionWithTimeout(sessionId, cwd, {
       model: modelSetting?.model,
@@ -750,15 +758,21 @@ export class SessionManager {
     const sessions: SDKSessionInfo[] = await sdkListSessions(cwd ? { dir: cwd } : undefined);
 
     // Build sessionId -> file birthtime map for accurate createdAt
-    const sessionFiles = listSessionFiles();
+    const sessionFiles = await listSessionFiles();
     const birthtimeMap = new Map<string, Date>();
-    for (const file of sessionFiles) {
-      const id = path.basename(file, ".jsonl");
-      try {
-        birthtimeMap.set(id, statSync(file).birthtime);
-      } catch {
-        // ignore stat errors
-      }
+    const statResults = await Promise.all(
+      sessionFiles.map(async (file) => {
+        try {
+          const id = path.basename(file, ".jsonl");
+          const { birthtime } = await stat(file);
+          return [id, birthtime] as const;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    for (const entry of statResults) {
+      if (entry) birthtimeMap.set(entry[0], entry[1]);
     }
 
     const result: SessionInfo[] = sessions.map((s) => ({
@@ -775,7 +789,7 @@ export class SessionManager {
 
   async renameSession(sessionId: string, title: string): Promise<void> {
     log("renameSession: sessionId=%s title=%s", sessionId, title);
-    const matches = listSessionFiles(`${sessionId}.jsonl`);
+    const matches = await listSessionFiles(`${sessionId}.jsonl`);
     if (matches.length === 0) {
       throw new Error(`Session file not found: ${sessionId}`);
     }
@@ -1040,7 +1054,7 @@ export class SessionManager {
 
   /** Delete a session's .jsonl file from disk. */
   async deleteSessionFile(sessionId: string): Promise<void> {
-    const matches = listSessionFiles(`${sessionId}.jsonl`);
+    const matches = await listSessionFiles(`${sessionId}.jsonl`);
     if (matches.length === 0) {
       log("deleteSessionFile: no file found for sessionId=%s", sessionId);
       return;
@@ -1081,7 +1095,7 @@ export class SessionManager {
       cwd?: string;
     },
   ): Promise<void> {
-    const matches = listSessionFiles(`${sessionId}.jsonl`);
+    const matches = await listSessionFiles(`${sessionId}.jsonl`);
     if (matches.length === 0) {
       log("archiveSessionFile: no file found for sessionId=%s", sessionId);
       return;
@@ -1303,7 +1317,11 @@ export class SessionManager {
         // On result, publish context_usage event with computed remaining %
         if (value.type === "result") {
           const modelEntries = Object.values(value.modelUsage ?? {});
-          const contextWindowSize = modelEntries[0]?.contextWindow ?? 0;
+          let contextWindowSize = modelEntries[0]?.contextWindow ?? 0;
+          if (!contextWindowSize) {
+            // Non-Anthropic providers often omit contextWindow; fall back to a known map.
+            contextWindowSize = lookupContextWindow(session.model);
+          }
           const remainingPct =
             contextWindowSize > 0
               ? Math.max(
