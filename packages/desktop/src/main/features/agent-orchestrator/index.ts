@@ -33,3 +33,18 @@ export {
   listTemplates,
 } from "./templates/registry";
 export { loadTemplates, saveCustomTemplates } from "./templates/loader";
+export { RecoveryOrchestrator } from "./recovery/recovery-orchestrator";
+export type { RecoveryDecision } from "./recovery/recovery-orchestrator";
+export { SandboxValidator } from "./recovery/sandbox-validator";
+export { ResumePromptBuilder } from "./recovery/resume-prompt-builder";
+export { WorktreeManager } from "./sandbox/worktree-manager";
+export { cleanupOrphanSandboxes } from "./sandbox/sandbox-cleanup";
+export { HeartbeatService } from "./safety/heartbeat";
+export { ConcurrencyLimiter } from "./safety/concurrency-limiter";
+export { StageTimeoutService } from "./safety/stage-timeout";
+export { Redactor } from "./safety/redaction";
+export { SingleInstanceLock } from "./safety/single-instance-lock";
+export { ProviderFallback } from "./safety/provider-fallback";
+export { ErrorStore } from "./errors/error-store";
+export { RetryPolicy } from "./errors/retry-policy";
+export { SubtaskTracker } from "./subtasks/subtask-tracker";
