@@ -49,14 +49,16 @@ function createManagerWithWindow(win: ReturnType<typeof mockBrowserWindow>): Bro
 }
 
 describe("BrowserWindowManager.ensureMinWidth", () => {
-  it("sets minimum size and resizes when current width is smaller", () => {
-    const win = mockBrowserWindow(800, 600);
+  it("sets minimum size and resizes when current width is below absolute minimum", () => {
+    const win = mockBrowserWindow(700, 600);
     const manager = createManagerWithWindow(win);
 
     manager.ensureMinWidth(1000);
 
+    // Minimum size constraint tracks the capped panel requirement
     expect(win.setMinimumSize).toHaveBeenCalledWith(1000, 600);
-    expect(win.setSize).toHaveBeenCalledWith(1000, 600);
+    // Only force-resize to MAIN_WINDOW_MIN_WIDTH (783), not the full capped value
+    expect(win.setSize).toHaveBeenCalledWith(783, 600);
   });
 
   it("updates minimum size but does not resize when width is sufficient", () => {
