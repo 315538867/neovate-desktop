@@ -1,14 +1,46 @@
-import { HelpCircle, RefreshCw } from "lucide-react";
+import { ExternalLink, FileText, HelpCircle, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "../../../../components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "../../../../components/ui/dialog";
 import { Spinner } from "../../../../components/ui/spinner";
 import { useRendererApp } from "../../../../core/app";
 import { client } from "../../../../orpc";
 import { useConfigStore } from "../../../config/store";
 import { useUpdaterState } from "../../../updater/hooks";
 import { SettingsRow } from "../settings-row";
+
+const UPSTREAM_REPO_URL = "https://github.com/neovateai/neovate-desktop";
+
+const LICENSE_TEXT = `The MIT License (MIT)
+
+Copyright (c) 2026-present Ant UED
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.`;
 
 export const AboutPanel = () => {
   const { t } = useTranslation();
@@ -133,6 +165,48 @@ export const AboutPanel = () => {
           <Button variant="outline" size="sm" onClick={handleSendFeedback}>
             {t("settings.about.sendFeedback")}
           </Button>
+        </SettingsRow>
+
+        {/* Upstream / Fork notice */}
+        <SettingsRow
+          title={t("settings.about.upstream")}
+          description={t("settings.about.upstream.description")}
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={() => window.open(UPSTREAM_REPO_URL, "_blank")}
+          >
+            <ExternalLink className="size-3.5" />
+            {t("settings.about.viewUpstream")}
+          </Button>
+        </SettingsRow>
+
+        {/* License */}
+        <SettingsRow
+          title={t("settings.about.license")}
+          description={t("settings.about.license.description")}
+        >
+          <Dialog>
+            <DialogTrigger
+              render={
+                <Button variant="outline" size="sm" className="gap-2">
+                  <FileText className="size-3.5" />
+                  {t("settings.about.viewLicense")}
+                </Button>
+              }
+            />
+            <DialogContent className="max-w-xl">
+              <DialogHeader>
+                <DialogTitle>{t("settings.about.license")}</DialogTitle>
+                <DialogDescription>{t("settings.about.license.dialogIntro")}</DialogDescription>
+              </DialogHeader>
+              <pre className="max-h-[60vh] overflow-auto rounded-lg border border-border/60 bg-muted/30 p-4 text-xs leading-relaxed whitespace-pre-wrap font-mono">
+                {LICENSE_TEXT}
+              </pre>
+            </DialogContent>
+          </Dialog>
         </SettingsRow>
       </div>
     </div>

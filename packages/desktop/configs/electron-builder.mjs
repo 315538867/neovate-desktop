@@ -76,6 +76,7 @@ const config = {
     { from: "vendor/bun", to: "bun", filter: ["bun", "bun.exe"] },
     { from: "vendor/rtk", to: "rtk", filter: ["rtk", "rtk.exe"] },
     { from: "resources/fetch-interceptor.js", to: "fetch-interceptor.js" },
+    { from: "../../LICENSE", to: "LICENSE" },
   ],
 
   files: [
