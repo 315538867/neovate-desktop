@@ -11,7 +11,6 @@
 export class ProviderFallback {
   private fallbackChain: string[][] = [];
   private healthStatus = new Map<string, ProviderHealth>();
-  private readonly RECOVERY_PROBE_INTERVAL = 60_000; // 1 min
   private readonly HEALTH_TTL = 300_000; // 5 min
 
   /**
@@ -92,10 +91,7 @@ export class ProviderFallback {
     health.lastError = reason;
     health.consecutiveFailures++;
     // 指数退避: 2^n 秒，最大 5 分钟
-    const backoffMs = Math.min(
-      1000 * Math.pow(2, health.consecutiveFailures),
-      300_000,
-    );
+    const backoffMs = Math.min(1000 * Math.pow(2, health.consecutiveFailures), 300_000);
     health.nextRetryAfter = Date.now() + backoffMs;
 
     this.healthStatus.set(provider, health);

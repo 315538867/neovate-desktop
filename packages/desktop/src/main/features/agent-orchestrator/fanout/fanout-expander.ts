@@ -45,7 +45,7 @@ export class FanOutExpander {
    */
   expand(
     templateStage: PipelineTemplate["stages"][number],
-    run: PipelineRun,
+    _run: PipelineRun,
     upstreamOutputs: Map<string, unknown>,
   ): FanOutExpansion {
     const fanOutConfig = templateStage.fanOut!;

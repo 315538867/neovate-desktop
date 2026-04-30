@@ -18,10 +18,7 @@ export interface FanInAggregator {
    * @param childRecords 子实例的 StageRunRecord
    * @returns 聚合后的输出
    */
-  aggregate(
-    childOutputs: Map<string, unknown>,
-    childRecords: StageRunRecord[],
-  ): unknown;
+  aggregate(childOutputs: Map<string, unknown>, childRecords: StageRunRecord[]): unknown;
 }
 
 /**
@@ -73,18 +70,17 @@ class MergeImplResultsAggregator implements FanInAggregator {
 
     // 状态派生
     const statuses = results.map((r) => r.status);
-    const status =
-      statuses.includes("failed") ? "failed"
-      : statuses.includes("partial") ? "partial"
-      : "success";
+    const status = statuses.includes("failed")
+      ? "failed"
+      : statuses.includes("partial")
+        ? "partial"
+        : "success";
 
     const summary = [
       `Aggregated ${results.length} implementation results.`,
       `Total files changed: ${filesChanged.length}`,
       `Status: ${status}`,
-      ...(unresolvedIssues.length > 0
-        ? [`${unresolvedIssues.length} unresolved issues`]
-        : []),
+      ...(unresolvedIssues.length > 0 ? [`${unresolvedIssues.length} unresolved issues`] : []),
     ].join("\n");
 
     return {
@@ -126,7 +122,13 @@ class MergeAcceptanceReportsAggregator implements FanInAggregator {
       return {
         decision: "rejected",
         score: 0,
-        defects: [{ severity: "blocker" as const, problem: "No acceptance reports to aggregate", fixHint: "" }],
+        defects: [
+          {
+            severity: "blocker" as const,
+            problem: "No acceptance reports to aggregate",
+            fixHint: "",
+          },
+        ],
         matchesArchitecture: false,
         followups: [],
       };
@@ -140,10 +142,11 @@ class MergeAcceptanceReportsAggregator implements FanInAggregator {
 
     // 决策派生
     const decisions = reports.map((r) => r.decision);
-    const decision =
-      decisions.includes("rejected") ? "rejected"
-      : decisions.includes("accepted_with_followups") ? "accepted_with_followups"
-      : "accepted";
+    const decision = decisions.includes("rejected")
+      ? "rejected"
+      : decisions.includes("accepted_with_followups")
+        ? "accepted_with_followups"
+        : "accepted";
 
     // 平均分
     const avgScore = Math.round(reports.reduce((sum, r) => sum + r.score, 0) / reports.length);
@@ -161,12 +164,7 @@ class MergeAcceptanceReportsAggregator implements FanInAggregator {
   }
 
   private isAcceptanceReport(v: unknown): v is AcceptanceReport {
-    return (
-      typeof v === "object" &&
-      v !== null &&
-      "defects" in v &&
-      "matchesArchitecture" in v
-    );
+    return typeof v === "object" && v !== null && "defects" in v && "matchesArchitecture" in v;
   }
 }
 
@@ -196,10 +194,7 @@ export class FanInAggregatorRegistry {
   /**
    * 执行 fan-in 聚合：收集子实例输出，调用聚合器，返回合并结果。
    */
-  aggregate(
-    aggregatorId: string,
-    childRecords: StageRunRecord[],
-  ): unknown | null {
+  aggregate(aggregatorId: string, childRecords: StageRunRecord[]): unknown | null {
     const aggregator = this.get(aggregatorId);
     if (!aggregator) return null;
 

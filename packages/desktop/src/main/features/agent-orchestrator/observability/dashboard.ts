@@ -1,4 +1,4 @@
-import type { PipelineRun, StageRunRecord } from "../../../../shared/features/agent-orchestrator/schemas";
+import type { PipelineRun } from "../../../../shared/features/agent-orchestrator/schemas";
 
 export interface DashboardStats {
   totalTokens: number;
@@ -70,10 +70,14 @@ export class DashboardGenerator {
         lines.push(`| Tokens | ${run.budget.usedTokens} | ${run.budget.maxTokens} |`);
       }
       if (run.budget.maxCost) {
-        lines.push(`| Cost | $${run.budget.usedCost.toFixed(4)} | $${run.budget.maxCost.toFixed(4)} |`);
+        lines.push(
+          `| Cost | $${run.budget.usedCost.toFixed(4)} | $${run.budget.maxCost.toFixed(4)} |`,
+        );
       }
       if (run.budget.maxDurationMs) {
-        lines.push(`| Duration | ${this.formatDuration(run.budget.usedDurationMs)} | ${this.formatDuration(run.budget.maxDurationMs)} |`);
+        lines.push(
+          `| Duration | ${this.formatDuration(run.budget.usedDurationMs)} | ${this.formatDuration(run.budget.maxDurationMs)} |`,
+        );
       }
       lines.push("");
     }
@@ -86,13 +90,19 @@ export class DashboardGenerator {
 
     for (const entry of stats.stageDetails) {
       const statusEmoji =
-        entry.status === "completed" ? "✅"
-        : entry.status === "failed" ? "❌"
-        : entry.status === "running" ? "🔄"
-        : entry.status === "awaiting_user" ? "👤"
-        : entry.status === "skipped" ? "⏭️"
-        : entry.status === "pending" ? "⏳"
-        : "❓";
+        entry.status === "completed"
+          ? "✅"
+          : entry.status === "failed"
+            ? "❌"
+            : entry.status === "running"
+              ? "🔄"
+              : entry.status === "awaiting_user"
+                ? "👤"
+                : entry.status === "skipped"
+                  ? "⏭️"
+                  : entry.status === "pending"
+                    ? "⏳"
+                    : "❓";
 
       lines.push(
         `| ${entry.instanceId}${entry.isFanOutChild ? " 🔀" : ""} | ${entry.stageId} | ${statusEmoji} ${entry.status} | ${entry.attempt} | ${entry.durationMs != null ? this.formatDuration(entry.durationMs) : "-"} | ${entry.errorCount} |`,
@@ -112,7 +122,9 @@ export class DashboardGenerator {
       lines.push("## Fan-Out");
       lines.push("");
       for (const fan of stats.fanOutStats) {
-        lines.push(`- **${fan.parentInstanceId}**: ${fan.completedChildren}/${fan.childCount} children completed`);
+        lines.push(
+          `- **${fan.parentInstanceId}**: ${fan.completedChildren}/${fan.childCount} children completed`,
+        );
       }
       lines.push("");
     }
@@ -125,7 +137,9 @@ export class DashboardGenerator {
       for (const stage of failedStages) {
         lines.push(`### ${stage.instanceId} (${stage.stageId})`);
         if (stage.fatalError) {
-          lines.push(`- Fatal: ${stage.fatalError.code} - ${stage.fatalError.providerMessage ?? "Unknown"}`);
+          lines.push(
+            `- Fatal: ${stage.fatalError.code} - ${stage.fatalError.providerMessage ?? "Unknown"}`,
+          );
         }
         for (const err of stage.errors) {
           lines.push(`- [${err.level}] \`${err.code}\`: ${err.providerMessage ?? "No message"}`);
@@ -148,9 +162,7 @@ export class DashboardGenerator {
       executorId: s.executorId,
       attempt: s.attempt,
       durationMs:
-        s.startedAt && s.completedAt
-          ? Date.parse(s.completedAt) - Date.parse(s.startedAt)
-          : null,
+        s.startedAt && s.completedAt ? Date.parse(s.completedAt) - Date.parse(s.startedAt) : null,
       errorCount: s.errors.length,
       hasOutput: s.output != null,
       isFanOutParent: run.stageRuns.some((child) => child.fanOutParentInstanceId === s.instanceId),
@@ -158,9 +170,7 @@ export class DashboardGenerator {
     }));
 
     const fanOutParents = new Set(
-      run.stageRuns
-        .filter((s) => s.fanOutParentInstanceId)
-        .map((s) => s.fanOutParentInstanceId!),
+      run.stageRuns.filter((s) => s.fanOutParentInstanceId).map((s) => s.fanOutParentInstanceId!),
     );
 
     const fanOutStats: FanOutStat[] = Array.from(fanOutParents).map((parentId) => {
@@ -168,7 +178,9 @@ export class DashboardGenerator {
       return {
         parentInstanceId: parentId,
         childCount: children.length,
-        completedChildren: children.filter((c) => c.status === "completed" || c.status === "skipped").length,
+        completedChildren: children.filter(
+          (c) => c.status === "completed" || c.status === "skipped",
+        ).length,
       };
     });
 
@@ -177,7 +189,9 @@ export class DashboardGenerator {
       totalCost: run.budget?.usedCost ?? 0,
       durationMs: run.budget?.usedDurationMs ?? 0,
       stageCount: run.stageRuns.length,
-      completedStageCount: stageDetails.filter((s) => s.status === "completed" || s.status === "skipped").length,
+      completedStageCount: stageDetails.filter(
+        (s) => s.status === "completed" || s.status === "skipped",
+      ).length,
       failedStageCount: stageDetails.filter((s) => s.status === "failed").length,
       skippedStageCount: stageDetails.filter((s) => s.status === "skipped").length,
       awaitingUserStageCount: stageDetails.filter((s) => s.status === "awaiting_user").length,

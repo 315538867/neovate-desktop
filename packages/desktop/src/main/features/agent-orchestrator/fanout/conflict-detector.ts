@@ -1,5 +1,4 @@
-import type { ArchitectureDoc, FileChange, StageRunRecord } from "../../../../shared/features/agent-orchestrator/schemas";
-
+import type { ArchitectureDoc } from "../../../../shared/features/agent-orchestrator/schemas";
 import type { ChangeTracker } from "../change-tracker";
 
 export interface ConflictResult {
@@ -94,7 +93,7 @@ export class ConflictDetector {
    * @param runId 当前 run
    * @param fanOutChildInstanceIds fanOut 子实例 ID 列表
    */
-  runtimeCheck(runId: string, fanOutChildInstanceIds: string[]): ConflictResult {
+  runtimeCheck(_runId: string, fanOutChildInstanceIds: string[]): ConflictResult {
     const conflicts: ConflictResult["conflicts"] = [];
 
     // 收集每个子实例的文件变更

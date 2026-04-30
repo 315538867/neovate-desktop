@@ -62,6 +62,10 @@ export type { FanInAggregator } from "./fanout/fanin-aggregator-registry";
 export { ConflictDetector } from "./fanout/conflict-detector";
 export type { ConflictResult } from "./fanout/conflict-detector";
 export { AnalyticsTracker } from "./observability/analytics";
-export type { AnalyticsEvent, PipelineAnalytics, StageResultSummary } from "./observability/analytics";
+export type {
+  AnalyticsEvent,
+  PipelineAnalytics,
+  StageResultSummary,
+} from "./observability/analytics";
 export { DashboardGenerator } from "./observability/dashboard";
 export type { DashboardStats, FanOutStat } from "./observability/dashboard";

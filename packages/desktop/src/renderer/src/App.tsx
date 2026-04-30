@@ -15,7 +15,7 @@ import {
 } from "./components/app-layout";
 import { FullRightPanel } from "./components/app-layout/full-right-panel";
 import { AgentChat, SessionList } from "./features/agent";
-import { OrchestratorChat, useOrchestratorStore } from "./features/agent-orchestrator";
+import { ModeToggle, OrchestratorChat, useOrchestratorStore } from "./features/agent-orchestrator";
 import { CommandPalette } from "./features/command-palette/command-palette";
 import { useConfigStore } from "./features/config/store";
 import { ContentPanelRenderer } from "./features/content-panel/components/content-panel";
@@ -80,6 +80,7 @@ export default function App() {
         <AppLayoutTitleBar>
           <AppLayoutPrimaryTitleBar />
           <AppLayoutSecondaryTitleBar />
+          <ModeToggle className="ml-auto" />
         </AppLayoutTitleBar>
 
         <AppLayoutChatPanel>

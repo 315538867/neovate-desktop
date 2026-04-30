@@ -6,7 +6,6 @@ import type { Orchestrator } from "./orchestrator";
 import { orchestratorContract } from "../../../shared/features/agent-orchestrator/contract";
 import { APP_DATA_DIR } from "../../core/app-paths";
 import { validateDAG } from "./dag/dag-validator";
-import { FanOutExpander } from "./fanout/fanout-expander";
 import { DashboardGenerator } from "./observability/dashboard";
 import { EventStore } from "./persistence/event-store";
 import { WorktreeManager } from "./sandbox/worktree-manager";
@@ -183,167 +182,157 @@ export const orchestratorRouter = os.orchestrator.router({
   }),
 
   // ==== 恢复 ====
-  listRecoverableRuns: os.orchestrator.listRecoverableRuns.handler(
-    async () => {
-      const orch = getOrchestrator();
-      const allRuns = orch.listRuns();
-      const recoverable: Array<{
-        run: unknown;
-        stage: unknown;
-        sandboxValid: boolean;
-        sandboxValidationDetails: Array<{ check: string; passed: boolean; detail?: string }>;
-        recommendedAction: "smart-resume" | "redo" | "skip" | "terminate";
-      }> = [];
+  listRecoverableRuns: os.orchestrator.listRecoverableRuns.handler(async () => {
+    const orch = getOrchestrator();
+    const allRuns = orch.listRuns();
+    const recoverable: Array<{
+      run: unknown;
+      stage: unknown;
+      sandboxValid: boolean;
+      sandboxValidationDetails: Array<{ check: string; passed: boolean; detail?: string }>;
+      recommendedAction: "smart-resume" | "redo" | "skip" | "terminate";
+    }> = [];
 
-      for (const run of allRuns) {
-        // 查找 interrupted/stalled 的 stage
-        const interruptedStage = run.stageRuns.find(
-          (s) =>
-            s.status === "interrupted_graceful" ||
-            s.status === "interrupted_crashed" ||
-            s.status === "stalled",
-        );
-        if (!interruptedStage) continue;
+    for (const run of allRuns) {
+      // 查找 interrupted/stalled 的 stage
+      const interruptedStage = run.stageRuns.find(
+        (s) =>
+          s.status === "interrupted_graceful" ||
+          s.status === "interrupted_crashed" ||
+          s.status === "stalled",
+      );
+      if (!interruptedStage) continue;
 
-        // 检查是否有 checkpoint
-        const hasCheckpoint = !!interruptedStage.checkpoint;
+      // 检查是否有 checkpoint
+      const hasCheckpoint = !!interruptedStage.checkpoint;
 
-        recoverable.push({
-          run: { runId: run.runId, templateId: run.templateId, status: run.status },
-          stage: {
-            instanceId: interruptedStage.instanceId,
-            stageId: interruptedStage.stageId,
-            status: interruptedStage.status,
+      recoverable.push({
+        run: { runId: run.runId, templateId: run.templateId, status: run.status },
+        stage: {
+          instanceId: interruptedStage.instanceId,
+          stageId: interruptedStage.stageId,
+          status: interruptedStage.status,
+        },
+        sandboxValid: hasCheckpoint,
+        sandboxValidationDetails: [
+          {
+            check: "checkpoint_exists",
+            passed: hasCheckpoint,
+            detail: hasCheckpoint ? "Checkpoint available for resume" : "No checkpoint found",
           },
-          sandboxValid: hasCheckpoint,
-          sandboxValidationDetails: [
-            { check: "checkpoint_exists", passed: hasCheckpoint, detail: hasCheckpoint ? "Checkpoint available for resume" : "No checkpoint found" },
-          ],
-          recommendedAction: hasCheckpoint ? "smart-resume" : "redo",
-        });
+        ],
+        recommendedAction: hasCheckpoint ? "smart-resume" : "redo",
+      });
+    }
+
+    return recoverable;
+  }),
+
+  resumeRunWithStrategy: os.orchestrator.resumeRunWithStrategy.handler(async ({ input }) => {
+    const orch = getOrchestrator();
+    const run = orch.getRun(input.runId);
+    if (!run) {
+      throw new ORPCError("NOT_FOUND", { message: `Run not found: ${input.runId}` });
+    }
+
+    switch (input.strategy) {
+      case "restart": {
+        // 将 interrupted stage 重置为 pending
+        const stage = run.stageRuns.find((s) => s.instanceId === input.instanceId);
+        if (stage) {
+          stage.status = "pending";
+          stage.output = undefined;
+          stage.errors = [];
+          stage.attempt = 0;
+        }
+        orch.recoverRun(run);
+        break;
       }
-
-      return recoverable;
-    },
-  ),
-
-  resumeRunWithStrategy: os.orchestrator.resumeRunWithStrategy.handler(
-    async ({ input }) => {
-      const orch = getOrchestrator();
-      const run = orch.getRun(input.runId);
-      if (!run) {
-        throw new ORPCError("NOT_FOUND", { message: `Run not found: ${input.runId}` });
+      case "resume-with-context": {
+        // 恢复执行，保留部分输出作为上下文
+        const stage = run.stageRuns.find((s) => s.instanceId === input.instanceId);
+        if (stage) {
+          stage.status = "pending";
+          // 保留 output 作为上下文
+        }
+        orch.recoverRun(run);
+        break;
       }
-
-      switch (input.strategy) {
-        case "restart": {
-          // 将 interrupted stage 重置为 pending
-          const stage = run.stageRuns.find((s) => s.instanceId === input.instanceId);
-          if (stage) {
-            stage.status = "pending";
-            stage.output = undefined;
-            stage.errors = [];
-            stage.attempt = 0;
-          }
-          orch.recoverRun(run);
-          break;
+      case "skip-to-next": {
+        const skipped = orch.skipStage(input.runId, input.instanceId);
+        if (!skipped) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: `Cannot skip stage: ${input.instanceId}`,
+          });
         }
-        case "resume-with-context": {
-          // 恢复执行，保留部分输出作为上下文
-          const stage = run.stageRuns.find((s) => s.instanceId === input.instanceId);
-          if (stage) {
-            stage.status = "pending";
-            // 保留 output 作为上下文
-          }
-          orch.recoverRun(run);
-          break;
-        }
-        case "skip-to-next": {
-          const skipped = orch.skipStage(input.runId, input.instanceId);
-          if (!skipped) {
-            throw new ORPCError("BAD_REQUEST", {
-              message: `Cannot skip stage: ${input.instanceId}`,
-            });
-          }
-          break;
-        }
-        case "terminate": {
-          orch.cancelRun(input.runId);
-          break;
-        }
+        break;
       }
+      case "terminate": {
+        orch.cancelRun(input.runId);
+        break;
+      }
+    }
 
-      return { success: true };
-    },
-  ),
+    return { success: true };
+  }),
 
   // ==== Fan-out / Fan-in ====
-  collapseFanOutToSerial: os.orchestrator.collapseFanOutToSerial.handler(
-    async ({ input }) => {
-      const orch = getOrchestrator();
-      const run = orch.getRun(input.runId);
-      if (!run) {
-        throw new ORPCError("NOT_FOUND", { message: `Run not found: ${input.runId}` });
-      }
+  collapseFanOutToSerial: os.orchestrator.collapseFanOutToSerial.handler(async ({ input }) => {
+    const orch = getOrchestrator();
+    const run = orch.getRun(input.runId);
+    if (!run) {
+      throw new ORPCError("NOT_FOUND", { message: `Run not found: ${input.runId}` });
+    }
 
-      const template = getTemplate(run.templateId);
-      if (!template) {
-        throw new ORPCError("BAD_REQUEST", { message: `Template not found: ${run.templateId}` });
-      }
+    const template = getTemplate(run.templateId);
+    if (!template) {
+      throw new ORPCError("BAD_REQUEST", { message: `Template not found: ${run.templateId}` });
+    }
 
-      // 找到父 stage (fanOut 源)
-      const parentStage = run.stageRuns.find(
-        (s) => s.instanceId === input.fanOutInstanceId,
-      );
-      if (!parentStage) {
-        throw new ORPCError("BAD_REQUEST", {
-          message: `Fan-out parent stage not found: ${input.fanOutInstanceId}`,
-        });
-      }
+    // 找到父 stage (fanOut 源)
+    const parentStage = run.stageRuns.find((s) => s.instanceId === input.fanOutInstanceId);
+    if (!parentStage) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `Fan-out parent stage not found: ${input.fanOutInstanceId}`,
+      });
+    }
 
-      // 找到所有子实例
-      const childInstances = run.stageRuns.filter(
-        (s) =>
-          s.fanOutParentInstanceId === input.fanOutInstanceId &&
-          s.status !== "completed" &&
-          s.status !== "skipped",
-      );
+    // 找到所有子实例
+    const childInstances = run.stageRuns.filter(
+      (s) =>
+        s.fanOutParentInstanceId === input.fanOutInstanceId &&
+        s.status !== "completed" &&
+        s.status !== "skipped",
+    );
 
-      // 跳过所有未完成的子实例
-      for (const child of childInstances) {
-        child.status = "skipped";
-        child.completedAt = new Date().toISOString();
-      }
+    // 跳过所有未完成的子实例
+    for (const child of childInstances) {
+      child.status = "skipped";
+      child.completedAt = new Date().toISOString();
+    }
 
-      // 将父 stage 状态重置（如果还在等待子实例）
-      if (parentStage.status === "running" || parentStage.status === "pending") {
-        parentStage.status = "pending";
-        parentStage.output = undefined;
-      }
+    // 将父 stage 状态重置（如果还在等待子实例）
+    if (parentStage.status === "running" || parentStage.status === "pending") {
+      parentStage.status = "pending";
+      parentStage.output = undefined;
+    }
 
-      return { success: true };
-    },
-  ),
+    return { success: true };
+  }),
 
   // ==== 改动应用 ====
-  applyChangesToWorkspace: os.orchestrator.applyChangesToWorkspace.handler(
-    async ({ input }) => {
-      const orch = getOrchestrator();
-      const run = orch.getRun(input.runId);
-      if (!run) {
-        throw new ORPCError("NOT_FOUND", { message: `Run not found: ${input.runId}` });
-      }
+  applyChangesToWorkspace: os.orchestrator.applyChangesToWorkspace.handler(async ({ input }) => {
+    const orch = getOrchestrator();
+    const run = orch.getRun(input.runId);
+    if (!run) {
+      throw new ORPCError("NOT_FOUND", { message: `Run not found: ${input.runId}` });
+    }
 
-      const wm = new WorktreeManager(APP_DATA_DIR);
-      const result = wm.applyChangesToWorkspace(
-        input.runId,
-        run.workspacePath,
-        input.mode,
-      );
+    const wm = new WorktreeManager(APP_DATA_DIR);
+    const result = wm.applyChangesToWorkspace(input.runId, run.workspacePath, input.mode);
 
-      return result;
-    },
-  ),
+    return result;
+  }),
 
   rollbackChanges: os.orchestrator.rollbackChanges.handler(async ({ input }) => {
     const orch = getOrchestrator();

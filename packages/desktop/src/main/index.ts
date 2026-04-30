@@ -3,14 +3,23 @@ import { electronApp, is } from "@electron-toolkit/utils";
 import { RPCHandler } from "@orpc/server/message-port";
 import debug from "debug";
 import { app, ipcMain, BrowserWindow } from "electron";
+import { join } from "node:path";
 
 import type { AppContext } from "./router";
 
 import { isMac } from "../shared/platform";
 import { MainApp } from "./app";
+import { APP_DATA_DIR } from "./core/app-paths";
 import { ApplicationMenu } from "./core/menu";
 import { PowerBlockerService } from "./core/power-blocker-service";
 import { shellEnvService } from "./core/shell-service";
+import { StorageService } from "./core/storage-service";
+import { Orchestrator, setOrchestrator } from "./features/agent-orchestrator";
+import { CheckpointManager } from "./features/agent-orchestrator/persistence/checkpoint-manager";
+import { EventStore } from "./features/agent-orchestrator/persistence/event-store";
+import { PartialOutputStore } from "./features/agent-orchestrator/persistence/partial-output-store";
+import { RunStore } from "./features/agent-orchestrator/persistence/run-store";
+import { startupCleanup } from "./features/agent-orchestrator/sandbox/sandbox-cleanup";
 import { RequestTracker } from "./features/agent/request-tracker";
 import { SessionManager } from "./features/agent/session-manager";
 import { PluginsService } from "./features/claude-code-plugins/plugins-service";
@@ -119,6 +128,39 @@ const remoteControlService = new RemoteControlService(
 remoteControlService.registerAdapter(new TelegramAdapter());
 remoteControlService.registerAdapter(new DingTalkAdapter());
 remoteControlService.registerAdapter(new WeChatAdapter());
+
+// ── Orchestrator 初始化 ──
+const orchStorage = new StorageService({ baseDir: APP_DATA_DIR });
+const runStore = new RunStore(orchStorage);
+const eventStore = new EventStore(APP_DATA_DIR);
+const partialOutputStore = new PartialOutputStore(orchStorage);
+const checkpointManager = new CheckpointManager(orchStorage);
+const orchestrator = new Orchestrator({
+  runStore,
+  eventStore,
+  partialOutputStore,
+  checkpointManager,
+});
+setOrchestrator(orchestrator);
+
+// 启动时清理过期 runs 和孤立 worktree（异步，不阻塞启动）
+const activeRunIds = new Set(orchestrator.listRuns().map((r) => r.runId));
+void Promise.resolve().then(() => {
+  const sandboxBaseDir = join(APP_DATA_DIR, "orchestrator", "sandboxes");
+  const result = startupCleanup(
+    sandboxBaseDir,
+    activeRunIds,
+    runStore.list({}),
+    projectStore.getActive()?.path ?? "",
+  );
+  if (result.expiredRuns > 0 || result.orphanWorktrees > 0) {
+    log(
+      "orchestrator startup cleanup: %d expired, %d orphans",
+      result.expiredRuns,
+      result.orphanWorktrees,
+    );
+  }
+});
 
 const appContext: AppContext = {
   sessionManager,

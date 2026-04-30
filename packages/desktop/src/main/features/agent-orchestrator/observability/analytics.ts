@@ -1,16 +1,58 @@
-import type { PipelineEvent, PipelineRun, StageRunRecord } from "../../../../shared/features/agent-orchestrator/schemas";
+import type {
+  PipelineEvent,
+  PipelineRun,
+  StageRunRecord,
+} from "../../../../shared/features/agent-orchestrator/schemas";
 
 /**
  * Analytics 事件类型
  */
 export type AnalyticsEvent =
-  | { type: "pipeline.started"; runId: string; templateId: string; stageCount: number; timestamp: string }
-  | { type: "pipeline.completed"; runId: string; durationMs: number; stageResults: StageResultSummary[]; timestamp: string }
+  | {
+      type: "pipeline.started";
+      runId: string;
+      templateId: string;
+      stageCount: number;
+      timestamp: string;
+    }
+  | {
+      type: "pipeline.completed";
+      runId: string;
+      durationMs: number;
+      stageResults: StageResultSummary[];
+      timestamp: string;
+    }
   | { type: "pipeline.failed"; runId: string; reason: string; timestamp: string }
-  | { type: "stage.completed"; runId: string; stageInstanceId: string; stageId: string; durationMs: number; timestamp: string }
-  | { type: "stage.failed"; runId: string; stageInstanceId: string; stageId: string; errorCode: string; timestamp: string }
-  | { type: "budget.exceeded"; runId: string; usedTokens: number; maxTokens: number; timestamp: string }
-  | { type: "fanout.expanded"; runId: string; parentInstanceId: string; childCount: number; timestamp: string };
+  | {
+      type: "stage.completed";
+      runId: string;
+      stageInstanceId: string;
+      stageId: string;
+      durationMs: number;
+      timestamp: string;
+    }
+  | {
+      type: "stage.failed";
+      runId: string;
+      stageInstanceId: string;
+      stageId: string;
+      errorCode: string;
+      timestamp: string;
+    }
+  | {
+      type: "budget.exceeded";
+      runId: string;
+      usedTokens: number;
+      maxTokens: number;
+      timestamp: string;
+    }
+  | {
+      type: "fanout.expanded";
+      runId: string;
+      parentInstanceId: string;
+      childCount: number;
+      timestamp: string;
+    };
 
 export interface StageResultSummary {
   instanceId: string;
@@ -25,7 +67,10 @@ export interface PipelineAnalytics {
   successRate: number;
   avgDurationMs: number;
   totalTokensUsed: number;
-  stageStats: Map<string, { total: number; completed: number; failed: number; avgDurationMs: number }>;
+  stageStats: Map<
+    string,
+    { total: number; completed: number; failed: number; avgDurationMs: number }
+  >;
 }
 
 /**
@@ -43,7 +88,11 @@ export class AnalyticsTracker {
   track(event: AnalyticsEvent): void {
     this.events.push(event);
     for (const listener of this.listeners) {
-      try { listener(event); } catch { /* ignore */ }
+      try {
+        listener(event);
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -106,25 +155,32 @@ export class AnalyticsTracker {
    */
   getAnalytics(): PipelineAnalytics {
     const completed = this.events.filter((e) => e.type === "pipeline.completed");
-    const failed = this.events.filter((e) => e.type === "pipeline.failed");
     const started = this.events.filter((e) => e.type === "pipeline.started");
 
     const total = started.length;
     const successRate = total > 0 ? completed.length / total : 0;
 
-    const durations = completed.map((e) => e.type === "pipeline.completed" ? e.durationMs : 0).filter((d) => d > 0);
-    const avgDurationMs = durations.length > 0
-      ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
-      : 0;
+    const durations = completed
+      .map((e) => (e.type === "pipeline.completed" ? e.durationMs : 0))
+      .filter((d) => d > 0);
+    const avgDurationMs =
+      durations.length > 0
+        ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
+        : 0;
 
-    const tokensUsed = completed.reduce((sum, e) => {
+    const tokensUsed = completed.reduce((sum, _e) => {
       // tokens from budget
       return sum;
     }, 0);
 
     // Stage stats
-    const stageStats = new Map<string, { total: number; completed: number; failed: number; avgDurationMs: number }>();
-    const stageCompletions = this.events.filter((e) => e.type === "stage.completed" || e.type === "stage.failed");
+    const stageStats = new Map<
+      string,
+      { total: number; completed: number; failed: number; avgDurationMs: number }
+    >();
+    const stageCompletions = this.events.filter(
+      (e) => e.type === "stage.completed" || e.type === "stage.failed",
+    );
     for (const ev of stageCompletions) {
       if (ev.type === "stage.completed" || ev.type === "stage.failed") {
         const stageId = ev.stageId;
@@ -171,9 +227,7 @@ export class AnalyticsTracker {
       status: s.status,
       attemptCount: s.attempt,
       durationMs:
-        s.startedAt && s.completedAt
-          ? Date.parse(s.completedAt) - Date.parse(s.startedAt)
-          : null,
+        s.startedAt && s.completedAt ? Date.parse(s.completedAt) - Date.parse(s.startedAt) : null,
     }));
   }
 }
