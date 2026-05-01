@@ -8,6 +8,7 @@ const loadLog = debug("neovate:agent-load-session");
 
 export function useLoadSession(fallbackCwd?: string) {
   const setActiveSession = useAgentStore((s) => s.setActiveSession);
+  const setLoadingSession = useAgentStore((s) => s.setLoadingSession);
   const createSession = useAgentStore((s) => s.createSession);
   const removeSession = useAgentStore((s) => s.removeSession);
   const setAvailableCommands = useAgentStore((s) => s.setAvailableCommands);
@@ -22,6 +23,8 @@ export function useLoadSession(fallbackCwd?: string) {
     return () => {
       loadAbortRef.current?.abort();
       loadAbortRef.current = null;
+      // Clear any in-flight loading flag if the consumer unmounts mid-load.
+      useAgentStore.getState().setLoadingSession(null);
     };
   }, []);
 
@@ -52,6 +55,10 @@ export function useLoadSession(fallbackCwd?: string) {
         "info=%o",
         info ? { title: info.title, cwd: info.cwd } : "not found in agentSessions",
       );
+
+      // Surface loading state so the chat panel can show a spinner and
+      // disable the input box during the await.
+      setLoadingSession(sessionId);
 
       try {
         const { commands, models, currentModel, modelScope, providerId } =
@@ -94,10 +101,16 @@ export function useLoadSession(fallbackCwd?: string) {
         if (loadAbortRef.current === ac) {
           loadAbortRef.current = null;
         }
+        // Only clear loading if no newer load has taken over.
+        const currentLoading = useAgentStore.getState().loadingSessionId;
+        if (currentLoading === sessionId) {
+          setLoadingSession(null);
+        }
       }
     },
     [
       setActiveSession,
+      setLoadingSession,
       createSession,
       removeSession,
       setAvailableCommands,

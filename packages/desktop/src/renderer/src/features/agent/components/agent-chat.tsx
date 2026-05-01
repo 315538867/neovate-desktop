@@ -21,6 +21,7 @@ import {
   ConversationScrollButton,
 } from "../../../components/ai-elements/conversation";
 import { Button } from "../../../components/ui/button";
+import { Spinner } from "../../../components/ui/spinner";
 import { cn } from "../../../lib/utils";
 import { claudeCodeChatManager } from "../chat-manager";
 import { useClaudeCodeChat } from "../hooks/use-claude-code-chat";
@@ -95,6 +96,7 @@ export function AgentChat() {
   const activeSessionId = useAgentStore((s) => s.activeSessionId);
   const setActiveSession = useAgentStore((s) => s.setActiveSession);
   const setAgentSessions = useAgentStore((s) => s.setAgentSessions);
+  const loadingSessionId = useAgentStore((s) => s.loadingSessionId);
   const hasActiveChat = useAgentStore((s) => {
     if (!s.activeSessionId) return false;
     const session = s.sessions.get(s.activeSessionId);
@@ -223,6 +225,11 @@ export function AgentChat() {
     });
   }, [activeProjectPath, createNewSession, setSessionInitError]);
 
+  // True when a different session is being loaded from disk. The currently
+  // visible chat (or welcome panel) stays mounted; we overlay a spinner and
+  // disable the input until the load completes.
+  const isLoadingOtherSession = loadingSessionId !== null && loadingSessionId !== activeSessionId;
+
   // State 1: No project selected — show welcome panel without input
   if (!activeProjectPath) {
     return (
@@ -235,13 +242,13 @@ export function AgentChat() {
   // State 2: No session yet (or new empty session) — show welcome panel with input
   if (!hasActiveChat) {
     return (
-      <div className="flex h-full flex-col">
+      <div className="relative flex h-full flex-col">
         <WelcomePanel hasProject />
         <MessageInput
           onSend={handleSend}
           onCancel={() => {}}
           streaming={false}
-          disabled={!activeProjectPath}
+          disabled={!activeProjectPath || isLoadingOtherSession}
           sessionInitializing={sessionInitializing}
           sessionInitError={sessionInitError}
           onRetry={handleRetry}
@@ -252,16 +259,39 @@ export function AgentChat() {
             <BranchSwitcher cwd={cwd} />
           </div>
         )}
+        {isLoadingOtherSession && <SessionLoadingOverlay />}
       </div>
     );
   }
 
   // State 3: Active session — full chat
-  return <AgentChatSession key={activeSessionId} sessionId={activeSessionId!} cwd={cwd} />;
+  return (
+    <div className="relative h-full">
+      <AgentChatSession key={activeSessionId} sessionId={activeSessionId!} cwd={cwd} />
+      {isLoadingOtherSession && <SessionLoadingOverlay />}
+    </div>
+  );
+}
+
+function SessionLoadingOverlay() {
+  const { t } = useTranslation();
+  return (
+    <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/60 backdrop-blur-sm">
+      <div className="flex flex-col items-center gap-3">
+        <Spinner className="size-5" />
+        <span className="text-xs text-muted-foreground">
+          {t("agent.loadingSession", "正在加载会话…")}
+        </span>
+      </div>
+    </div>
+  );
 }
 
 function AgentChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }) {
   const tasks = useAgentStore((s) => s.sessions.get(sessionId)?.tasks);
+  const isLoadingOther = useAgentStore(
+    (s) => s.loadingSessionId !== null && s.loadingSessionId !== sessionId,
+  );
   const { messages, status, error, pendingRequests, sendMessage, stop, clearError } =
     useClaudeCodeChat(sessionId);
   const hasPendingRequest = pendingRequests.length > 0;
@@ -332,7 +362,7 @@ function AgentChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }
               onSend={handleSend}
               onCancel={handleCancel}
               streaming={status === "streaming"}
-              disabled={hasPendingRequest}
+              disabled={hasPendingRequest || isLoadingOther}
               cwd={cwd}
               dockAttached={hasPendingRequest}
             />

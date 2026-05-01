@@ -379,14 +379,19 @@ export class SessionManager {
         )
       : await readModelSetting(sessionId, cwd);
 
-    const capabilities = await this.initSessionWithTimeout(sessionId, cwd, {
-      model: modelSetting?.model,
-      resume: sessionId,
-      provider,
-    });
-
+    // Run SDK session init and on-disk message hydration in parallel:
+    // they are independent (getSessionMessages just reads the .jsonl file
+    // and does not require the resumed query to be live). This typically
+    // shaves the smaller of the two off the perceived load latency.
     const { getSessionMessages } = await import("@anthropic-ai/claude-agent-sdk");
-    const sessionMessages = await getSessionMessages(sessionId);
+    const [capabilities, sessionMessages] = await Promise.all([
+      this.initSessionWithTimeout(sessionId, cwd, {
+        model: modelSetting?.model,
+        resume: sessionId,
+        provider,
+      }),
+      getSessionMessages(sessionId),
+    ]);
     const messages = await sessionMessagesToUIMessages(sessionMessages);
 
     log(

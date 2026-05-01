@@ -179,7 +179,7 @@ app.whenReady().then(async () => {
   void remoteControlService.startEnabledAdapters();
 
   // Setup application menu (for menu items, shortcuts handled in renderer)
-  menu = new ApplicationMenu(updaterService);
+  menu = new ApplicationMenu(updaterService, configStore);
 
   // Register global shortcut for popup window
   popupShortcut = new PopupWindowShortcut(configStore, mainApp.windowManager);

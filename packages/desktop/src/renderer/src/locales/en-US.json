@@ -586,6 +586,7 @@
   "chat.sessionInitFailed": "Session failed to start",
   "chat.sessionInitRetry": "Retry",
   "chat.sessionInitNetworkHint": "Try disabling Network Inspector in Settings and retry",
+  "agent.loadingSession": "Loading session…",
 
   "chat.tools.bashOutput.polling": "Polling background shell output",
   "chat.tools.bashOutput.pollingFiltered": "Polling background shell output filtered by {{filter}}.",

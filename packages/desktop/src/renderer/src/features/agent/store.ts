@@ -87,8 +87,11 @@ type AgentState = {
   _sessionsMetaVersion: number;
   isRewinding: boolean;
   rewindUndoBuffer: RewindUndoBuffer | null;
+  /** Session id currently being loaded from disk (resume from sidebar click). */
+  loadingSessionId: string | null;
 
   setActiveSession: (sessionId: string | null) => void;
+  setLoadingSession: (sessionId: string | null) => void;
   setAgentSessions: (sessions: SessionInfo[]) => void;
   createSession: (
     sessionId: string,
@@ -143,6 +146,7 @@ export const useAgentStore = create<AgentState>()(
     _sessionsMetaVersion: 0,
     isRewinding: false,
     rewindUndoBuffer: null,
+    loadingSessionId: null,
 
     setActiveSession: (sessionId) => {
       storeLog("setActiveSession: %s", sessionId);
@@ -152,6 +156,13 @@ export const useAgentStore = create<AgentState>()(
         state.rewindUndoBuffer = null;
       });
       if (sessionId) clearTurnResult(sessionId);
+    },
+
+    setLoadingSession: (sessionId) => {
+      storeLog("setLoadingSession: %s", sessionId);
+      set((state) => {
+        state.loadingSessionId = sessionId;
+      });
     },
 
     setAgentSessions: (agentSessions) => {

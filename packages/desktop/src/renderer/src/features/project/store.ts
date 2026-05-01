@@ -59,6 +59,10 @@ export const useProjectStore = create<ProjectState>()(
     },
     archiveSession: (projectPath, sessionId, isActive) => {
       log("archive session", { projectPath, sessionId, isActive });
+      // Defend against stale `isActive` from memo'd session items: read live.
+      const liveActive = useAgentStore.getState().activeSessionId === sessionId;
+      const archivingActive = isActive || liveActive;
+
       client.project.archiveSession({ projectPath, sessionId }).catch(() => {});
       set((state) => {
         const list = state.archivedSessions[projectPath] ?? [];
@@ -76,31 +80,34 @@ export const useProjectStore = create<ProjectState>()(
       claudeCodeChatManager.removeSession(sessionId).catch(() => {});
       useAgentStore.getState().removeSession(sessionId);
 
-      // Replace the active session: reuse a pre-warmed one or create new
-      if (isActive) {
-        const preWarmed = findPreWarmedSession(projectPath);
-        if (preWarmed) {
-          log("replacing active session with pre-warmed session", { preWarmed });
-          useAgentStore.getState().setActiveSession(preWarmed);
-          // The pre-warmed session was consumed — create a new one
-          claudeCodeChatManager.preWarmForProject(projectPath);
-        } else {
-          log("no pre-warmed session, creating new session for project", { projectPath });
-          claudeCodeChatManager
-            .createSession(projectPath)
-            .then(({ sessionId: newId, commands, models, currentModel, modelScope }) => {
-              log("new session created after archive", { newId });
-              registerSessionInStore(
-                newId,
-                projectPath,
-                { commands, models, currentModel, modelScope },
-                true,
-              );
-              // Pre-warm a background session for the next "New Chat"
-              claudeCodeChatManager.preWarmForProject(projectPath);
-            })
-            .catch(() => {});
-        }
+      if (!archivingActive) return;
+
+      // Archiving the active session: explicitly return to the welcome page
+      // first (synchronous), then bring up a fresh chat for this project.
+      // This guarantees the "back to start" UX regardless of pre-warm timing.
+      useAgentStore.getState().setActiveSession(null);
+
+      const preWarmed = findPreWarmedSession(projectPath);
+      if (preWarmed) {
+        log("archive: activating pre-warmed session", { preWarmed });
+        useAgentStore.getState().setActiveSession(preWarmed);
+        // The pre-warmed session was consumed — refill the pool.
+        claudeCodeChatManager.preWarmForProject(projectPath);
+      } else {
+        log("archive: no pre-warmed session, creating new", { projectPath });
+        claudeCodeChatManager
+          .createSession(projectPath)
+          .then(({ sessionId: newId, commands, models, currentModel, modelScope, providerId }) => {
+            log("archive: new session created", { newId });
+            registerSessionInStore(
+              newId,
+              projectPath,
+              { commands, models, currentModel, modelScope, providerId },
+              true,
+            );
+            claudeCodeChatManager.preWarmForProject(projectPath);
+          })
+          .catch(() => {});
       }
     },
     togglePinSession: (projectPath, sessionId) => {

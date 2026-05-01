@@ -588,6 +588,7 @@
   "chat.sessionInitFailed": "会话启动失败",
   "chat.sessionInitRetry": "重试",
   "chat.sessionInitNetworkHint": "尝试在设置中关闭网络检查器后重试",
+  "agent.loadingSession": "正在加载会话…",
 
   "chat.tools.bashOutput.polling": "正在轮询后台 Shell 输出",
   "chat.tools.bashOutput.pollingFiltered": "正在轮询后台 Shell 输出，过滤条件：{{filter}}。",
