@@ -18,7 +18,11 @@ export class DisposableStore {
   dispose(): void {
     const copy = this.items.splice(0);
     for (const item of copy) {
-      typeof item === "function" ? item() : item.dispose();
+      if (typeof item === "function") {
+        item();
+      } else {
+        item.dispose();
+      }
     }
   }
 }

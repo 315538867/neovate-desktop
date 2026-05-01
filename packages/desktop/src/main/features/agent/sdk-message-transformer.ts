@@ -411,6 +411,7 @@ export class SDKMessageTransformer {
     }
   }
 
+  // oxlint-disable-next-line require-yield -- caller uses yield*; keeping as generator for symmetry with sibling handlers
   private *handleMessageStop(): Generator<ClaudeCodeUIMessageChunk> {
     if (this.currentMessageId != null && !this.currentStreamHasUnsupportedBlocks) {
       this.completedStreamedAssistantMessageIds.add(this.currentMessageId);

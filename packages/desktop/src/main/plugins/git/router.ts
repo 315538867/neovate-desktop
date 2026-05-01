@@ -6,6 +6,7 @@ import git from "simple-git";
 import type { GitBranch, GitBranchFile } from "../../../shared/plugins/git/contract";
 import type { PluginContext } from "../../core/plugin/types";
 
+import { acquireHeadPublisher, releaseHeadPublisher } from "./head-watcher";
 import { gitAdd } from "./utils/add";
 import { gitCommit } from "./utils/commit";
 import { getFileDiff, gitDiffCached } from "./utils/diff";
@@ -236,6 +237,24 @@ export function createGitRouter(orpcServer: PluginContext["orpcServer"]) {
           success: false,
           error: error instanceof Error ? error.message : "Unknown error occurred",
         };
+      }
+    }),
+    subscribeHead: orpcServer.handler(async function* ({ input, signal }) {
+      const { cwd } = input as { cwd: string };
+      log("subscribeHead: subscribing", { cwd });
+      const publisher = acquireHeadPublisher(cwd);
+      const cleanup = () => releaseHeadPublisher(cwd);
+      if (signal) signal.addEventListener("abort", cleanup, { once: true });
+      try {
+        const events = publisher.subscribe("head-changed", { signal });
+        for await (const event of events) {
+          yield event;
+        }
+      } catch (e) {
+        if (e instanceof Error && e.name === "AbortError") return;
+        log("subscribeHead error: %O", e);
+      } finally {
+        cleanup();
       }
     }),
   });

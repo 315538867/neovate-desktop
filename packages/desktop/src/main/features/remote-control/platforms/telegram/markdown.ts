@@ -3,7 +3,7 @@
  * Characters that need escaping outside of code blocks:
  * _ * [ ] ( ) ~ ` > # + - = | { } . !
  */
-const SPECIAL_CHARS = /([_*\[\]()~`>#+\-=|{}.!\\])/g;
+const SPECIAL_CHARS = /([_*[\]()~`>#+\-=|{}.!\\])/g;
 
 function escapeMarkdownV2(text: string): string {
   return text.replace(SPECIAL_CHARS, "\\$1");

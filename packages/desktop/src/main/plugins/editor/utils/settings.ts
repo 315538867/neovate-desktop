@@ -74,7 +74,7 @@ export async function overrideCodeServerSettings(dataDir: string): Promise<void>
       const fileContent = fs.readFileSync(settingsPath, "utf-8");
       try {
         existingSettings = JSON.parse(fileContent);
-      } catch (parseError) {
+      } catch {
         log("failed to parse existing settings.json, using empty object");
       }
     }

@@ -132,7 +132,12 @@ export class ConfigStore {
   }
 
   getAll(): AppConfig {
-    const { providers, provider, model, ...config } = this.store.store;
+    const {
+      providers: _providers,
+      provider: _provider,
+      model: _model,
+      ...config
+    } = this.store.store;
     return { ...DEFAULT_APP_CONFIG, ...config };
   }
 

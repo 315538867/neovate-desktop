@@ -154,6 +154,8 @@ export function unwatchDirectory(dir: string) {
 
 export function unwatchAll() {
   log("unwatching all directories", { count: dirWatchers.size });
+  // Snapshot keys because unwatchDirectory mutates the map.
+  // oxlint-disable-next-line no-useless-spread
   for (const dir of [...dirWatchers.keys()]) {
     unwatchDirectory(dir);
   }

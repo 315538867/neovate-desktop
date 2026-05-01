@@ -1,3 +1,4 @@
+import { consumeEventIterator } from "@orpc/client";
 import debug from "debug";
 import { Check, ChevronDown, GitBranch, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -144,6 +145,30 @@ export function BranchSwitcher({ cwd, disabled }: Props) {
     };
     window.addEventListener("neovate:turn-completed", handler);
     return () => window.removeEventListener("neovate:turn-completed", handler);
+  }, [cwd]);
+
+  // Real-time sync via fs.watch on .git/HEAD — catches branch switches
+  // performed externally (e.g. via terminal) immediately, even when the
+  // app window is unfocused.
+  useEffect(() => {
+    const refetch = () => {
+      client.git
+        .branches({ cwd, limit: 1 })
+        .then((result) => {
+          if (result.success && result.data) {
+            setCurrentBranch(result.data.current);
+            setDetachedHead(result.data.detachedHead);
+          }
+        })
+        .catch(() => {});
+    };
+    const cancel = consumeEventIterator(client.git.subscribeHead({ cwd }), {
+      onEvent: () => refetch(),
+      onError: () => {},
+    });
+    return () => {
+      cancel();
+    };
   }, [cwd]);
 
   // Debounced search

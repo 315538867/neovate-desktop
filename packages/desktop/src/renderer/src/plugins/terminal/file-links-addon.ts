@@ -182,7 +182,6 @@ export class FileLinksAddon implements IDisposable {
         const endPos = this._stringIndexToBufferPosition(line, endIdx, y);
 
         if (startPos && endPos) {
-          const addon = this;
           links.push({
             text: uri,
             range: {
@@ -194,10 +193,10 @@ export class FileLinksAddon implements IDisposable {
               this._handler(event, text);
             },
             hover: (event: MouseEvent, text: string) => {
-              addon._showTooltip(event, text);
+              this._showTooltip(event, text);
             },
             leave: () => {
-              addon._hideTooltip();
+              this._hideTooltip();
             },
           });
         }

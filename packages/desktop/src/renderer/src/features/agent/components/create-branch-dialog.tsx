@@ -22,6 +22,7 @@ type TFn = (key: string) => string;
 const INVALID_REF_RULES: [RegExp, string][] = [
   [/\s/, "branch.create.noSpaces"],
   [/\.\./, "branch.create.noDoubleDot"],
+  // oxlint-disable-next-line no-control-regex -- git ref names forbid these control chars
   [/[\x00-\x1f\x7f~^:?*[\\]/, "branch.create.invalidChars"],
   [/\/$/, "branch.create.noTrailingSlash"],
   [/\.lock$/, "branch.create.noLockSuffix"],

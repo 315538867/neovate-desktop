@@ -1,4 +1,8 @@
-import { oc, type } from "@orpc/contract";
+import { oc, type, eventIterator } from "@orpc/contract";
+
+export interface GitHeadEvent {
+  timestamp: number;
+}
 
 export interface GitFile {
   fullPath: string;
@@ -118,4 +122,5 @@ export const gitContract = {
     .output(type<GitCreateBranchResponse>()),
   branchFiles: oc.input(type<{ cwd: string }>()).output(type<GitBranchFilesResponse>()),
   branchFileDiff: oc.input(type<{ cwd: string; file: string }>()).output(type<GitDiffResponse>()),
+  subscribeHead: oc.input(type<{ cwd: string }>()).output(eventIterator(type<GitHeadEvent>())),
 };

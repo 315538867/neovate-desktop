@@ -122,7 +122,7 @@ function searchContentWithMatches(
               });
             }
           }
-        } catch (_e) {
+        } catch {
           log("Failed to parse JSON line: %s", line);
         }
       }

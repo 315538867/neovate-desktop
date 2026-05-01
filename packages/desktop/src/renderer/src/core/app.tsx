@@ -231,6 +231,7 @@ export class RendererApp implements IRendererApp {
   readonly opener = new OpenerService();
   readonly #windowType: string;
   // @ts-expect-error reserved for future use
+  // oxlint-disable-next-line no-unused-private-class-members -- reserved for future use
   readonly #windowId: string;
   readonly subscriptions = new DisposableStore();
   readonly project = {

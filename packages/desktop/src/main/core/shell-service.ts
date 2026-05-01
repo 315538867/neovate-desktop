@@ -18,7 +18,7 @@ export function getSystemShell(): string {
   if (!shell) {
     try {
       shell = os.userInfo().shell;
-    } catch (_err) {
+    } catch {
       // userInfo() can throw if user has no username or homedir
     }
   }

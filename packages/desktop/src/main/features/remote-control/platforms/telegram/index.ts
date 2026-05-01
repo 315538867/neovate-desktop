@@ -255,7 +255,7 @@ export class TelegramAdapter implements RemoteControlPlatformAdapter {
       return toTelegramMarkdownV2(text);
     } catch {
       // If formatting fails, escape everything conservatively
-      return text.replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, "\\$1");
+      return text.replace(/([_*[\]()~`>#+\-=|{}.!\\])/g, "\\$1");
     }
   }
 }
