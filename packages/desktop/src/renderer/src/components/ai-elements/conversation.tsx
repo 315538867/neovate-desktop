@@ -8,6 +8,7 @@ import {
   forwardRef,
   useCallback,
   useContext,
+  useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -17,6 +18,7 @@ import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
+import { usePinnedState } from "./use-pinned-state";
 
 // Public handle exposed via `contextRef` — replaces use-stick-to-bottom's
 // StickToBottomContext. Internally backed by react-virtuoso for windowed
@@ -49,6 +51,16 @@ export type ConversationProps = {
   children?: ReactNode;
 };
 
+// Threshold (px) below the geometric bottom that still counts as "at bottom".
+// Set generously so collapse/expand of code blocks or reasoning blocks does
+// not flip the state.
+const AT_BOTTOM_THRESHOLD = 120;
+
+// Debounce window for atBottomStateChange transitions away from true. Entering
+// "at bottom" is applied immediately; leaving is delayed to absorb jitter
+// produced by short-lived height changes during streaming.
+const AT_BOTTOM_LEAVE_DEBOUNCE_MS = 80;
+
 export const Conversation = forwardRef<HTMLDivElement, ConversationProps>(
   ({ items, className, contextRef, children }, _ref) => {
     const handle = useRef<VirtuosoHandle>(null);
@@ -56,13 +68,22 @@ export const Conversation = forwardRef<HTMLDivElement, ConversationProps>(
     const lastScrollTop = useRef(0);
     const [atBottom, setAtBottom] = useState(true);
 
+    // User-intent layer: decoupled from Virtuoso's geometric atBottom.
+    // Truth source for whether new content should follow to bottom.
+    // Mutating isPinnedRef does not trigger re-renders; Virtuoso re-evaluates
+    // the followOutput callback on every items change.
+    const { isPinnedRef, pinToBottom } = usePinnedState(scrollerRef);
+    const atBottomLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
     const scrollToBottom = useCallback(
       (behavior: "smooth" | "auto" = "smooth") => {
+        // Programmatic scrollToBottom = explicit user intent to follow.
+        pinToBottom();
         const last = items.length - 1;
         if (last < 0) return;
         handle.current?.scrollToIndex({ index: last, behavior, align: "end" });
       },
-      [items.length],
+      [items.length, pinToBottom],
     );
 
     useImperativeHandle(
@@ -77,6 +98,69 @@ export const Conversation = forwardRef<HTMLDivElement, ConversationProps>(
       }),
       [scrollToBottom],
     );
+
+    // followOutput is a function so Virtuoso re-evaluates it per items change.
+    // Returning "auto" (instant) avoids stacking smooth animations against the
+    // estimate→measure→correct cycle that produces visible flicker.
+    const followOutput = useCallback(() => {
+      return isPinnedRef.current ? ("auto" as const) : false;
+    }, []);
+
+    // atBottom geometry only drives UI (scroll-to-bottom button visibility).
+    // It does NOT drive follow intent — that lives in isPinnedRef and is
+    // controlled by user input events. This decoupling is why a code block
+    // collapse cannot kill the follow state.
+    const onAtBottomStateChange = useCallback(
+      (b: boolean) => {
+        if (atBottomLeaveTimerRef.current) {
+          clearTimeout(atBottomLeaveTimerRef.current);
+          atBottomLeaveTimerRef.current = null;
+        }
+        if (b) {
+          setAtBottom(true);
+          // Naturally scrolling back to the bottom restores the follow intent.
+          pinToBottom();
+          // Force-realign Virtuoso to geometric bottom. atBottomStateChange(true)
+          // can fire transiently when streaming continues to push scrollHeight up;
+          // without an imperative scrollToIndex here, Virtuoso's internal atBottom
+          // would flip back to false in the next frame and gate followOutput off
+          // permanently. See plan: lazy-swimming-lovelace.md root cause analysis.
+          const last = items.length - 1;
+          if (last >= 0) {
+            handle.current?.scrollToIndex({ index: last, behavior: "auto", align: "end" });
+          }
+        } else {
+          atBottomLeaveTimerRef.current = setTimeout(() => {
+            setAtBottom(false);
+          }, AT_BOTTOM_LEAVE_DEBOUNCE_MS);
+        }
+      },
+      [pinToBottom, items.length],
+    );
+
+    // Safety net: if pin is on but Virtuoso's internal shouldFollow is dead-
+    // locked (atBottom=false) at the moment a new item arrives — typical after
+    // a user expanded a reasoning block, dragged to bottom, and released right
+    // as a streaming token landed — force-align imperatively.
+    const prevItemsLengthRef = useRef(items.length);
+    useEffect(() => {
+      const prev = prevItemsLengthRef.current;
+      prevItemsLengthRef.current = items.length;
+      if (items.length <= prev) return;
+      if (!isPinnedRef.current) return;
+      const last = items.length - 1;
+      if (last >= 0) {
+        handle.current?.scrollToIndex({ index: last, behavior: "auto", align: "end" });
+      }
+    }, [items.length]);
+
+    useEffect(() => {
+      return () => {
+        if (atBottomLeaveTimerRef.current) {
+          clearTimeout(atBottomLeaveTimerRef.current);
+        }
+      };
+    }, []);
 
     const ctxValue = useMemo<ConversationCtxValue>(
       () => ({ atBottom, scrollToBottom }),
@@ -96,12 +180,10 @@ export const Conversation = forwardRef<HTMLDivElement, ConversationProps>(
             itemContent={(_, node) => (
               <div className="max-w-3xl mx-auto w-full px-4 pb-4">{node}</div>
             )}
-            followOutput="smooth"
-            atBottomStateChange={(b) => {
-              setAtBottom(b);
-            }}
-            atBottomThreshold={4}
-            increaseViewportBy={400}
+            followOutput={followOutput}
+            atBottomStateChange={onAtBottomStateChange}
+            atBottomThreshold={AT_BOTTOM_THRESHOLD}
+            increaseViewportBy={200}
             initialTopMostItemIndex={items.length > 0 ? items.length - 1 : 0}
             onScroll={(e) => {
               lastScrollTop.current = (e.currentTarget as HTMLElement).scrollTop;
