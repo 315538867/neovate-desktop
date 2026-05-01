@@ -1,6 +1,6 @@
 {
   "name": "neovate-desktop",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "An Electron application with React and TypeScript",
   "homepage": "https://neovateai.dev",
   "bugs": {
