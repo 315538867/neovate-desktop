@@ -4,16 +4,24 @@ import debug from "debug";
 
 import type { ClaudeCodeUIMessage } from "../../../../shared/claude-code/types";
 
+import { extractTextFromUserContent, isCompactSummaryText } from "./compact-detection";
+import {
+  readCompactMetaFromJsonl,
+  parseCompactMeta,
+  type CompactMeta,
+} from "./read-jsonl-compact-meta";
 import { sdkMessagesToUIMessage } from "./sdk-messages-to-ui-message";
 
 const log = debug("neovate:session-messages");
 
 /**
  * Raw session message shape including fields that the upstream SDK type
- * declaration omits but appear at runtime in the on-disk `.jsonl` files.
+ * declaration omits but may appear at runtime. Field names differ between
+ * SDK type (snake_case) and on-disk jsonl (camelCase) — we read both.
  *
- * Field names differ between SDK type (snake_case) and on-disk jsonl
- * (camelCase) — declare both for robust read access.
+ * Note: in SDK v0.2.108, the SDK strips `isCompactSummary` from the user
+ * message before returning it, so the field is included here only as a
+ * defensive read for future SDK versions that may restore it.
  */
 type RawSessionMessage = SDKMessage & {
   isCompactSummary?: boolean;
@@ -27,6 +35,8 @@ type CompactSummaryPart = Extract<
   ClaudeCodeUIMessage["parts"][number],
   { type: "data-compact-summary" }
 >;
+
+const FALLBACK_META: CompactMeta = { trigger: "auto", preTokens: 0 };
 
 function countMessageTypes(messages: SDKMessage[]) {
   const counts = new Map<string, number>();
@@ -44,67 +54,39 @@ function countMessageTypes(messages: SDKMessage[]) {
   return Object.fromEntries(counts);
 }
 
-function extractSummaryText(msg: RawSessionMessage | undefined): string {
-  if (msg == null) return "";
-  const content = msg.message?.content;
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .filter((b: { type: string }) => b.type === "text")
-      .map((b: { type: string; text?: string }) => b.text ?? "")
-      .join("");
-  }
-  return "";
-}
-
 /**
- * Synthesize a single system UI message representing a compact boundary
- * by merging the boundary message with the immediately following
- * `isCompactSummary: true` user message (which carries the summary text).
+ * Synthesize a single system UI message representing a compact boundary.
+ * `summaryRaw` may come from either an embedded boundary message or a
+ * standalone compact-summary user message.
  */
-function buildCompactSummaryMessage(
-  boundary: RawSessionMessage,
-  next: RawSessionMessage | undefined,
-): { uiMessage: ClaudeCodeUIMessage; consumedNext: boolean } {
-  const cm = (boundary.compact_metadata ?? boundary.compactMetadata ?? {}) as Record<
-    string,
-    unknown
-  >;
-  const trigger = (cm.trigger as "manual" | "auto") ?? "auto";
-  const preTokens = Number(cm.pre_tokens ?? cm.preTokens ?? 0);
-  const postTokensRaw = cm.post_tokens ?? cm.postTokens;
-  const durationRaw = cm.duration_ms ?? cm.durationMs;
-
-  const nextIsSummary = next != null && next.type === "user" && next.isCompactSummary === true;
-  const summaryRaw = nextIsSummary ? extractSummaryText(next) : "";
-
-  const sessionId = (boundary as { session_id?: string }).session_id ?? "";
-  const uuid = boundary.uuid ?? crypto.randomUUID();
-
+function buildCompactSummaryMessage(args: {
+  summaryRaw: string;
+  meta: CompactMeta;
+  sessionId: string;
+  uuid: string;
+}): ClaudeCodeUIMessage {
+  const { summaryRaw, meta, sessionId, uuid } = args;
   const part: CompactSummaryPart = {
     type: "data-compact-summary",
     data: {
-      trigger,
-      preTokens,
-      ...(postTokensRaw != null ? { postTokens: Number(postTokensRaw) } : {}),
-      ...(durationRaw != null ? { durationMs: Number(durationRaw) } : {}),
+      trigger: meta.trigger,
+      preTokens: meta.preTokens,
+      ...(meta.postTokens != null ? { postTokens: meta.postTokens } : {}),
+      ...(meta.durationMs != null ? { durationMs: meta.durationMs } : {}),
       summaryRaw,
     },
   };
 
   return {
-    uiMessage: {
-      id: uuid,
-      role: "system",
-      parts: [part],
-      metadata: {
-        deliveryMode: "restored",
-        sessionId,
-        parentToolUseId: null,
-      },
-    } as ClaudeCodeUIMessage,
-    consumedNext: nextIsSummary,
-  };
+    id: uuid,
+    role: "system",
+    parts: [part],
+    metadata: {
+      deliveryMode: "restored",
+      sessionId,
+      parentToolUseId: null,
+    },
+  } as ClaudeCodeUIMessage;
 }
 
 /**
@@ -112,9 +94,10 @@ function buildCompactSummaryMessage(
  * Human prompts become user messages; assistant/tool_result batches
  * are replayed through the AI SDK stream protocol.
  *
- * Accepts SessionMessage[] (from getSessionMessages) — cast internally
- * to SDKMessage[] since the runtime data includes system/result types
- * that the SessionMessage type declaration doesn't cover.
+ * Compact handling: SDK strips boundary markers, so we (a) detect
+ * synthetic compact-summary user messages by their fixed text prefix,
+ * and (b) read the original `.jsonl` to recover compact metadata
+ * (trigger / preTokens / postTokens / durationMs) in document order.
  */
 export async function sessionMessagesToUIMessages(
   sessionMessages: SessionMessage[],
@@ -126,6 +109,21 @@ export async function sessionMessagesToUIMessages(
 
   const rawMessageTypes = countMessageTypes(messages as SDKMessage[]);
   log("RAW messageTypes=%O", rawMessageTypes);
+
+  // Recover compact metadata from disk in parallel-friendly order. We use the
+  // session_id from the first message that carries one (system/init typically
+  // does). If we can't find one, metas is empty and we fall back to defaults.
+  const sessionIdForMeta =
+    (
+      messages.find((m) => (m as { session_id?: string }).session_id) as
+        | { session_id?: string }
+        | undefined
+    )?.session_id ?? "";
+  const metas = sessionIdForMeta
+    ? await readCompactMetaFromJsonl(sessionIdForMeta).catch(() => [] as CompactMeta[])
+    : ([] as CompactMeta[]);
+  let metaCursor = 0;
+  const consumeMeta = (): CompactMeta => metas[metaCursor++] ?? FALLBACK_META;
 
   const flushBatch = async () => {
     if (batch.length === 0) return;
@@ -156,17 +154,47 @@ export async function sessionMessagesToUIMessages(
     }
   };
 
+  const emitCompactSummary = async (summaryRaw: string, sessionId: string, uuid: string) => {
+    await flushBatch();
+    results.push(
+      buildCompactSummaryMessage({
+        summaryRaw,
+        meta: consumeMeta(),
+        sessionId,
+        uuid,
+      }),
+    );
+  };
+
   for (let i = 0; i < messages.length; i += 1) {
     const msg = messages[i];
 
-    // Handle compact boundary: merge with the immediately following
-    // user message (which carries `isCompactSummary: true` and the actual
-    // summary text) into a single synthesized system UI message.
+    // Legacy / future-compat path: if SDK actually returns a `compact_boundary`
+    // system message, consume it together with the following compact-summary
+    // user message (if present). This branch is currently dormant on
+    // SDK v0.2.108 but kept for forward compatibility.
     if (msg.type === "system" && (msg as { subtype?: string }).subtype === "compact_boundary") {
+      const next = messages[i + 1];
+      const nextText =
+        next != null && next.type === "user"
+          ? extractTextFromUserContent(next.message?.content)
+          : "";
+      const isAdjacentSummary =
+        next != null &&
+        next.type === "user" &&
+        ((next as { isCompactSummary?: boolean }).isCompactSummary === true ||
+          isCompactSummaryText(nextText));
+      const summaryRaw = isAdjacentSummary ? nextText : "";
       await flushBatch();
-      const { uiMessage, consumedNext } = buildCompactSummaryMessage(msg, messages[i + 1]);
-      results.push(uiMessage);
-      if (consumedNext) i += 1;
+      results.push(
+        buildCompactSummaryMessage({
+          summaryRaw,
+          meta: parseCompactMeta(msg.compact_metadata ?? msg.compactMetadata) ?? consumeMeta(),
+          sessionId: (msg as { session_id?: string }).session_id ?? "",
+          uuid: msg.uuid ?? crypto.randomUUID(),
+        }),
+      );
+      if (isAdjacentSummary) i += 1;
       continue;
     }
 
@@ -183,13 +211,20 @@ export async function sessionMessagesToUIMessages(
       continue;
     }
 
-    // Defensive: a stray isCompactSummary user message without a preceding
-    // compact_boundary should not be rendered as a normal user prompt.
-    if (msg.isCompactSummary === true) {
+    const content = msg.message?.content;
+
+    // Detect the auto-injected compact-summary user message — either by the
+    // (rare, SDK-stripped) `isCompactSummary` flag or by its fixed text prefix.
+    const userText = extractTextFromUserContent(content);
+    if (msg.isCompactSummary === true || isCompactSummaryText(userText)) {
+      await emitCompactSummary(
+        userText,
+        (msg as SDKMessage).session_id ?? "",
+        msg.uuid ?? crypto.randomUUID(),
+      );
       continue;
     }
 
-    const content = msg.message?.content;
     const isToolResultMessage =
       Array.isArray(content) && content.some((p: { type: string }) => p.type === "tool_result");
     const isHumanTextPrompt = typeof content === "string";
@@ -260,6 +295,6 @@ export async function sessionMessagesToUIMessages(
   }
 
   await flushBatch();
-  log("DONE results=%d", results.length);
+  log("DONE results=%d compactMetas=%d/%d", results.length, metaCursor, metas.length);
   return results;
 }
