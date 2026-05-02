@@ -8,6 +8,26 @@ import { sdkMessagesToUIMessage } from "./sdk-messages-to-ui-message";
 
 const log = debug("neovate:session-messages");
 
+/**
+ * Raw session message shape including fields that the upstream SDK type
+ * declaration omits but appear at runtime in the on-disk `.jsonl` files.
+ *
+ * Field names differ between SDK type (snake_case) and on-disk jsonl
+ * (camelCase) — declare both for robust read access.
+ */
+type RawSessionMessage = SDKMessage & {
+  isCompactSummary?: boolean;
+  message?: { content?: unknown };
+  compact_metadata?: Record<string, unknown>;
+  compactMetadata?: Record<string, unknown>;
+  uuid?: string;
+};
+
+type CompactSummaryPart = Extract<
+  ClaudeCodeUIMessage["parts"][number],
+  { type: "data-compact-summary" }
+>;
+
 function countMessageTypes(messages: SDKMessage[]) {
   const counts = new Map<string, number>();
 
@@ -22,6 +42,69 @@ function countMessageTypes(messages: SDKMessage[]) {
   }
 
   return Object.fromEntries(counts);
+}
+
+function extractSummaryText(msg: RawSessionMessage | undefined): string {
+  if (msg == null) return "";
+  const content = msg.message?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((b: { type: string }) => b.type === "text")
+      .map((b: { type: string; text?: string }) => b.text ?? "")
+      .join("");
+  }
+  return "";
+}
+
+/**
+ * Synthesize a single system UI message representing a compact boundary
+ * by merging the boundary message with the immediately following
+ * `isCompactSummary: true` user message (which carries the summary text).
+ */
+function buildCompactSummaryMessage(
+  boundary: RawSessionMessage,
+  next: RawSessionMessage | undefined,
+): { uiMessage: ClaudeCodeUIMessage; consumedNext: boolean } {
+  const cm = (boundary.compact_metadata ?? boundary.compactMetadata ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const trigger = (cm.trigger as "manual" | "auto") ?? "auto";
+  const preTokens = Number(cm.pre_tokens ?? cm.preTokens ?? 0);
+  const postTokensRaw = cm.post_tokens ?? cm.postTokens;
+  const durationRaw = cm.duration_ms ?? cm.durationMs;
+
+  const nextIsSummary = next != null && next.type === "user" && next.isCompactSummary === true;
+  const summaryRaw = nextIsSummary ? extractSummaryText(next) : "";
+
+  const sessionId = (boundary as { session_id?: string }).session_id ?? "";
+  const uuid = boundary.uuid ?? crypto.randomUUID();
+
+  const part: CompactSummaryPart = {
+    type: "data-compact-summary",
+    data: {
+      trigger,
+      preTokens,
+      ...(postTokensRaw != null ? { postTokens: Number(postTokensRaw) } : {}),
+      ...(durationRaw != null ? { durationMs: Number(durationRaw) } : {}),
+      summaryRaw,
+    },
+  };
+
+  return {
+    uiMessage: {
+      id: uuid,
+      role: "system",
+      parts: [part],
+      metadata: {
+        deliveryMode: "restored",
+        sessionId,
+        parentToolUseId: null,
+      },
+    } as ClaudeCodeUIMessage,
+    consumedNext: nextIsSummary,
+  };
 }
 
 /**
@@ -39,9 +122,9 @@ export async function sessionMessagesToUIMessages(
   log("START count=%d", sessionMessages.length);
   const results: ClaudeCodeUIMessage[] = [];
   let batch: SDKMessage[] = [];
-  const messages = sessionMessages as unknown as SDKMessage[];
+  const messages = sessionMessages as unknown as RawSessionMessage[];
 
-  const rawMessageTypes = countMessageTypes(messages);
+  const rawMessageTypes = countMessageTypes(messages as SDKMessage[]);
   log("RAW messageTypes=%O", rawMessageTypes);
 
   const flushBatch = async () => {
@@ -73,7 +156,20 @@ export async function sessionMessagesToUIMessages(
     }
   };
 
-  for (const msg of messages) {
+  for (let i = 0; i < messages.length; i += 1) {
+    const msg = messages[i];
+
+    // Handle compact boundary: merge with the immediately following
+    // user message (which carries `isCompactSummary: true` and the actual
+    // summary text) into a single synthesized system UI message.
+    if (msg.type === "system" && (msg as { subtype?: string }).subtype === "compact_boundary") {
+      await flushBatch();
+      const { uiMessage, consumedNext } = buildCompactSummaryMessage(msg, messages[i + 1]);
+      results.push(uiMessage);
+      if (consumedNext) i += 1;
+      continue;
+    }
+
     // Skip messages that don't contribute to UIMessage content
     if (msg.type === "system" && msg.subtype !== "init") continue;
     if (msg.type === "result") continue;
@@ -87,7 +183,13 @@ export async function sessionMessagesToUIMessages(
       continue;
     }
 
-    const content = msg.message.content;
+    // Defensive: a stray isCompactSummary user message without a preceding
+    // compact_boundary should not be rendered as a normal user prompt.
+    if (msg.isCompactSummary === true) {
+      continue;
+    }
+
+    const content = msg.message?.content;
     const isToolResultMessage =
       Array.isArray(content) && content.some((p: { type: string }) => p.type === "tool_result");
     const isHumanTextPrompt = typeof content === "string";
@@ -148,12 +250,12 @@ export async function sessionMessagesToUIMessages(
         parts,
         metadata: {
           deliveryMode: "restored",
-          sessionId: msg.session_id,
+          sessionId: (msg as SDKMessage).session_id,
           parentToolUseId: null,
         },
       } as ClaudeCodeUIMessage);
     } else {
-      batch.push(msg);
+      batch.push(msg as SDKMessage);
     }
   }
 

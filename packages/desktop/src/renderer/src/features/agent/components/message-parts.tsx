@@ -30,6 +30,7 @@ import {
 } from "../../../components/ui/collapsible";
 import { cn } from "../../../lib/utils";
 import { useMarkdownComponents } from "../hooks/use-markdown-components";
+import { CompactSummaryBlock, type CompactSummaryData } from "./compact-summary-block";
 import { MessageRewindButton } from "./message-rewind-button";
 import { useAssistantMessageSummaryCollapse } from "./use-assistant-message-summary-collapse";
 
@@ -244,6 +245,10 @@ export const MessagePartRenderer = memo(
           }
 
           switch (part.type) {
+            case "data-compact-summary": {
+              const data = (part as { data: CompactSummaryData }).data;
+              return <CompactSummaryBlock key={`${message.id}-${index}`} data={data} />;
+            }
             case "text": {
               const isLastText = index === lastTextIndex;
               const canShowAssistantActions =

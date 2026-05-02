@@ -42,6 +42,13 @@ type Metadata = {
 type DataTypes = {
   "system/init": SDKSystemMessage;
   "system/compact_boundary": SDKCompactBoundaryMessage;
+  "compact-summary": {
+    trigger: "manual" | "auto";
+    preTokens: number;
+    postTokens?: number;
+    durationMs?: number;
+    summaryRaw: string;
+  };
   "result/success": SDKResultSuccess;
 } & { [K in SDKResultError["subtype"] as `result/${K}`]: SDKResultError };
 

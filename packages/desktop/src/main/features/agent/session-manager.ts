@@ -390,7 +390,7 @@ export class SessionManager {
         resume: sessionId,
         provider,
       }),
-      getSessionMessages(sessionId),
+      getSessionMessages(sessionId, { includeSystemMessages: true }),
     ]);
     const messages = await sessionMessagesToUIMessages(sessionMessages);
 
