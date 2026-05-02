@@ -1,7 +1,8 @@
+import i18n from "i18next";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { claudeCodeChatManager } from "../chat-manager";
-import { VERBS } from "../components/query-status";
+import { getVerbs } from "../components/query-status";
 
 const SPINNER_FRAMES = ["·", "✢", "✳", "✶", "✻", "✽"];
 const PING_PONG = [...SPINNER_FRAMES, ...SPINNER_FRAMES.slice(1, -1).reverse()];
@@ -35,7 +36,8 @@ const IDLE: QueryStatus = {
 };
 
 function pickVerb(): [string, string] {
-  return VERBS[Math.floor(Math.random() * VERBS.length)];
+  const verbs = getVerbs(i18n.language);
+  return verbs[Math.floor(Math.random() * verbs.length)];
 }
 
 const noop = () => () => {};
