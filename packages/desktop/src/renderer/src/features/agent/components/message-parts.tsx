@@ -34,6 +34,15 @@ import { CompactSummaryBlock, type CompactSummaryData } from "./compact-summary-
 import { MessageRewindButton } from "./message-rewind-button";
 import { useAssistantMessageSummaryCollapse } from "./use-assistant-message-summary-collapse";
 
+const INTERRUPTED_BY_USER_MARKER = "[Request interrupted by user]";
+
+function stripInterruptedMarker(text: string): { text: string; interrupted: boolean } {
+  const idx = text.lastIndexOf(INTERRUPTED_BY_USER_MARKER);
+  if (idx === -1) return { text, interrupted: false };
+  const before = text.slice(0, idx).trimEnd();
+  return { text: before, interrupted: true };
+}
+
 type RenderToolPart = (
   message: ClaudeCodeUIMessage,
   part: ToolUIPart<ClaudeCodeUITools>,
@@ -220,6 +229,7 @@ export const MessagePartRenderer = memo(
     sessionId?: string;
     isStreaming?: boolean;
   }) => {
+    const { t } = useTranslation();
     const markdownComponents = useMarkdownComponents();
     const { lastTextIndex, firstImageIndex, imageFileParts, nonImageFileParts } = useMemo(() => {
       return {
@@ -250,13 +260,11 @@ export const MessagePartRenderer = memo(
               return <CompactSummaryBlock key={`${message.id}-${index}`} data={data} />;
             }
             case "text": {
+              const { text: displayText, interrupted } = stripInterruptedMarker(part.text);
               const isLastText = index === lastTextIndex;
+              const hasText = displayText.trim().length > 0;
               const canShowAssistantActions =
-                message.role === "assistant" &&
-                showActions &&
-                isComplete &&
-                isLastText &&
-                !!part.text.trim();
+                message.role === "assistant" && showActions && isComplete && isLastText && hasText;
               const canShowUserActions = message.role === "user" && isLastText && !!sessionId;
               const remoteSource = isLastText ? message.metadata?.source : undefined;
               return (
@@ -266,10 +274,20 @@ export const MessagePartRenderer = memo(
                   from={message.role}
                 >
                   <MessageContent>
-                    {message.role === "assistant" ? (
-                      <MessageResponse components={markdownComponents}>{part.text}</MessageResponse>
-                    ) : (
-                      <p className="m-0 whitespace-pre-wrap">{part.text}</p>
+                    {hasText &&
+                      (message.role === "assistant" ? (
+                        <MessageResponse components={markdownComponents}>
+                          {displayText}
+                        </MessageResponse>
+                      ) : (
+                        <p className="m-0 whitespace-pre-wrap">{displayText}</p>
+                      ))}
+                    {interrupted && (
+                      <p
+                        className={cn("text-xs italic text-muted-foreground/70", hasText && "mt-1")}
+                      >
+                        {t("chat.messages.interruptedByUser")}
+                      </p>
                     )}
                   </MessageContent>
                   {remoteSource && (
@@ -281,7 +299,7 @@ export const MessagePartRenderer = memo(
                   )}
                   {canShowAssistantActions && (
                     <MessageActions className="mt-2">
-                      <CopyMarkdownButton text={part.text} />
+                      <CopyMarkdownButton text={displayText} />
                     </MessageActions>
                   )}
                   {canShowUserActions && (

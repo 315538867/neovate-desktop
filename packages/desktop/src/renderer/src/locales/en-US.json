@@ -7,6 +7,7 @@
   "chat.messages.copyMarkdown": "Copy markdown",
   "chat.messages.compactSummary.triggerAuto": "Conversation auto-compacted",
   "chat.messages.compactSummary.triggerManual": "Conversation compacted",
+  "chat.messages.interruptedByUser": "Request interrupted by user",
   "chat.queryStatus.thoughtFor": "thought for {{duration}}",
   "chat.queryStatus.thinking": "thinking…",
   "chat.queryStatus.completedFor": "{{verb}} for {{duration}}",

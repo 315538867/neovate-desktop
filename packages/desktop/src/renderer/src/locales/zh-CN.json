@@ -7,6 +7,7 @@
   "chat.messages.copyMarkdown": "复制 Markdown",
   "chat.messages.compactSummary.triggerAuto": "会话已自动压缩",
   "chat.messages.compactSummary.triggerManual": "会话已压缩",
+  "chat.messages.interruptedByUser": "用户中断请求",
   "chat.queryStatus.thoughtFor": "思考用时 {{duration}}",
   "chat.queryStatus.thinking": "思考中…",
   "chat.queryStatus.completedFor": "{{verb}} 用时 {{duration}}",
