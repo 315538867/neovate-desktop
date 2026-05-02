@@ -106,42 +106,37 @@ export const Conversation = forwardRef<HTMLDivElement, ConversationProps>(
       return isPinnedRef.current ? ("auto" as const) : false;
     }, []);
 
-    // atBottom geometry only drives UI (scroll-to-bottom button visibility).
-    // It does NOT drive follow intent — that lives in isPinnedRef and is
-    // controlled by user input events. This decoupling is why a code block
-    // collapse cannot kill the follow state.
-    const onAtBottomStateChange = useCallback(
-      (b: boolean) => {
-        if (atBottomLeaveTimerRef.current) {
-          clearTimeout(atBottomLeaveTimerRef.current);
-          atBottomLeaveTimerRef.current = null;
-        }
-        if (b) {
-          setAtBottom(true);
-          // Naturally scrolling back to the bottom restores the follow intent.
-          pinToBottom();
-          // Force-realign Virtuoso to geometric bottom. atBottomStateChange(true)
-          // can fire transiently when streaming continues to push scrollHeight up;
-          // without an imperative scrollToIndex here, Virtuoso's internal atBottom
-          // would flip back to false in the next frame and gate followOutput off
-          // permanently. See plan: lazy-swimming-lovelace.md root cause analysis.
-          const last = items.length - 1;
-          if (last >= 0) {
-            handle.current?.scrollToIndex({ index: last, behavior: "auto", align: "end" });
-          }
-        } else {
-          atBottomLeaveTimerRef.current = setTimeout(() => {
-            setAtBottom(false);
-          }, AT_BOTTOM_LEAVE_DEBOUNCE_MS);
-        }
-      },
-      [pinToBottom, items.length],
-    );
+    // atBottom geometry ONLY drives UI (scroll-to-bottom button visibility).
+    // It does NOT drive follow intent — pin (isPinnedRef) is the single truth
+    // source, mutated by real user input events (wheel / touch / keyboard /
+    // scroll) inside usePinnedState. This decoupling is critical: during
+    // streaming the geometric atBottom thrashes within AT_BOTTOM_THRESHOLD as
+    // scrollHeight grows; if we re-pinned or imperatively realigned here, a
+    // user mid-scroll would be yanked back to bottom (visible flicker + jump).
+    // SIZE_INCREASED dead-locks are handled by the items.length useEffect
+    // below, which only fires when the user's pin intent is still ON.
+    const onAtBottomStateChange = useCallback((b: boolean) => {
+      if (atBottomLeaveTimerRef.current) {
+        clearTimeout(atBottomLeaveTimerRef.current);
+        atBottomLeaveTimerRef.current = null;
+      }
+      if (b) {
+        setAtBottom(true);
+      } else {
+        atBottomLeaveTimerRef.current = setTimeout(() => {
+          setAtBottom(false);
+        }, AT_BOTTOM_LEAVE_DEBOUNCE_MS);
+      }
+    }, []);
 
-    // Safety net: if pin is on but Virtuoso's internal shouldFollow is dead-
-    // locked (atBottom=false) at the moment a new item arrives — typical after
-    // a user expanded a reasoning block, dragged to bottom, and released right
-    // as a streaming token landed — force-align imperatively.
+    // Follow-intent realignment on new items.
+    // When the user has pin ON (intent to follow streaming output) but
+    // Virtuoso's internal shouldFollow is gated off (geometric atBottom=false
+    // due to a pending SIZE_INCREASED measurement, e.g. user expanded a
+    // reasoning block then dragged near bottom), Virtuoso's followOutput
+    // alone cannot recover. Force-align imperatively per items.length tick.
+    // Guard with isPinnedRef so we NEVER yank a user who is intentionally
+    // scrolled away.
     const prevItemsLengthRef = useRef(items.length);
     useEffect(() => {
       const prev = prevItemsLengthRef.current;

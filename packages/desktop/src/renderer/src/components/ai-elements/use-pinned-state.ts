@@ -11,10 +11,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
  *   - wheel with deltaY < 0 (mouse/trackpad scroll up)
  *   - touchmove finger moving down (content scrolling up)
  *   - keyboard PageUp / Home / ArrowUp on the scroller
+ *   - scroll event with scrollTop decreasing (scrollbar drag, momentum tail)
  *   - leaveBottom() called externally
  *
  * Flip ON (resume following):
  *   - keyboard End on the scroller
+ *   - scroll event reaching the geometric bottom
  *   - reachBottom() called externally (e.g. user reached geometric bottom by
  *     scrolling, or programmatic scrollToBottom was invoked)
  *   - pinToBottom() called externally
@@ -74,6 +76,7 @@ export function usePinnedState(scrollerRef: RefObject<HTMLElement | null>): Pinn
     if (!el) return;
 
     let touchStartY = 0;
+    let lastScrollTop = el.scrollTop;
 
     const onWheel = (e: WheelEvent) => {
       if (e.deltaY < 0) {
@@ -97,17 +100,34 @@ export function usePinnedState(scrollerRef: RefObject<HTMLElement | null>): Pinn
         isPinnedRef.current = true;
       }
     };
+    // Scroll fallback: covers scrollbar drag (no wheel/touch event), trackpad
+    // momentum tail, and "user naturally reached bottom → re-engage follow".
+    // Compares against last seen scrollTop so streaming-induced scrollHeight
+    // growth (which keeps scrollTop fixed) does not falsely flip pin.
+    const onScroll = () => {
+      const top = el.scrollTop;
+      if (top < lastScrollTop - 1) {
+        // User moved up.
+        isPinnedRef.current = false;
+      } else if (el.scrollHeight - top - el.clientHeight < 1) {
+        // User reached the geometric bottom — re-engage follow intent.
+        isPinnedRef.current = true;
+      }
+      lastScrollTop = top;
+    };
 
     el.addEventListener("wheel", onWheel, { passive: true });
     el.addEventListener("touchstart", onTouchStart, { passive: true });
     el.addEventListener("touchmove", onTouchMove, { passive: true });
     el.addEventListener("keydown", onKeyDown);
+    el.addEventListener("scroll", onScroll, { passive: true });
 
     return () => {
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("touchstart", onTouchStart);
       el.removeEventListener("touchmove", onTouchMove);
       el.removeEventListener("keydown", onKeyDown);
+      el.removeEventListener("scroll", onScroll);
     };
   }, [scrollerReady, scrollerRef]);
 

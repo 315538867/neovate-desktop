@@ -13,9 +13,14 @@ import { usePinnedState } from "../use-pinned-state";
  * in a useRef on the wrapper component, mirroring how Conversation passes the
  * scrollerRef into the hook.
  */
-function renderPinned() {
+function renderPinned(initialGeometry?: {
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+}) {
   const el = document.createElement("div");
   document.body.append(el);
+  if (initialGeometry) mockGeometry(el, initialGeometry);
 
   const { result, unmount } = renderHook(() => {
     const ref = useRef<HTMLElement | null>(el);
@@ -30,6 +35,29 @@ function renderPinned() {
       el.remove();
     },
   };
+}
+
+/**
+ * Mocks scroll geometry on the DOM element. jsdom does not lay out, so
+ * scrollTop / scrollHeight / clientHeight need to be stubbed per-test.
+ * Hoisted above renderPinned so the helper can apply it before mount.
+ */
+function mockGeometry(
+  el: HTMLElement,
+  geom: { scrollTop: number; scrollHeight: number; clientHeight: number },
+) {
+  Object.defineProperty(el, "scrollTop", {
+    configurable: true,
+    get: () => geom.scrollTop,
+  });
+  Object.defineProperty(el, "scrollHeight", {
+    configurable: true,
+    get: () => geom.scrollHeight,
+  });
+  Object.defineProperty(el, "clientHeight", {
+    configurable: true,
+    get: () => geom.clientHeight,
+  });
 }
 
 /** Wait for the rAF-driven scrollerReady tick to resolve and listeners to bind. */
@@ -166,5 +194,78 @@ describe("usePinnedState", () => {
     const before = result.current.isPinnedRef.current;
     el.dispatchEvent(new WheelEvent("wheel", { deltaY: -10 }));
     expect(result.current.isPinnedRef.current).toBe(before);
+  });
+
+  /**
+   * Mocks a scroll geometry on the DOM element. jsdom does not lay out, so
+   * scrollTop / scrollHeight / clientHeight need to be stubbed per-test.
+   * (Implementation hoisted above describe block; this comment kept for context.)
+   */
+
+  it("scroll event with decreasing scrollTop flips pin OFF (covers scrollbar drag)", async () => {
+    const { result, el, unmount } = renderPinned({
+      scrollTop: 500,
+      scrollHeight: 2000,
+      clientHeight: 500,
+    });
+    await waitForListenersBound();
+
+    expect(result.current.isPinnedRef.current).toBe(true);
+    // User drags scrollbar up: scrollTop decreases.
+    mockGeometry(el, { scrollTop: 400, scrollHeight: 2000, clientHeight: 500 });
+    el.dispatchEvent(new Event("scroll"));
+    expect(result.current.isPinnedRef.current).toBe(false);
+    unmount();
+  });
+
+  it("scroll event reaching geometric bottom flips pin ON", async () => {
+    const { result, el, unmount } = renderPinned({
+      scrollTop: 800,
+      scrollHeight: 2000,
+      clientHeight: 500,
+    });
+    await waitForListenersBound();
+
+    act(() => result.current.leaveBottom());
+    expect(result.current.isPinnedRef.current).toBe(false);
+    // User scrolls down to true geometric bottom: scrollTop + clientHeight === scrollHeight.
+    mockGeometry(el, { scrollTop: 1500, scrollHeight: 2000, clientHeight: 500 });
+    el.dispatchEvent(new Event("scroll"));
+    expect(result.current.isPinnedRef.current).toBe(true);
+    unmount();
+  });
+
+  it("scroll event with increasing scrollTop but not at bottom keeps pin unchanged", async () => {
+    const { result, el, unmount } = renderPinned({
+      scrollTop: 500,
+      scrollHeight: 2000,
+      clientHeight: 500,
+    });
+    await waitForListenersBound();
+
+    act(() => result.current.leaveBottom());
+    expect(result.current.isPinnedRef.current).toBe(false);
+    // Mid-list downward scroll: still off pin.
+    mockGeometry(el, { scrollTop: 800, scrollHeight: 2000, clientHeight: 500 });
+    el.dispatchEvent(new Event("scroll"));
+    expect(result.current.isPinnedRef.current).toBe(false);
+    unmount();
+  });
+
+  it("scroll event with scrollHeight growing (streaming) but scrollTop fixed does NOT flip pin", async () => {
+    const { result, el, unmount } = renderPinned({
+      scrollTop: 500,
+      scrollHeight: 2000,
+      clientHeight: 500,
+    });
+    await waitForListenersBound();
+
+    act(() => result.current.leaveBottom());
+    expect(result.current.isPinnedRef.current).toBe(false);
+    // Streaming pushes scrollHeight up; scrollTop unchanged. User intent must persist.
+    mockGeometry(el, { scrollTop: 500, scrollHeight: 2400, clientHeight: 500 });
+    el.dispatchEvent(new Event("scroll"));
+    expect(result.current.isPinnedRef.current).toBe(false);
+    unmount();
   });
 });
