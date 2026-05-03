@@ -243,147 +243,233 @@ export const MessagePartRenderer = memo(
       };
     }, [message.parts]);
 
-    return (
-      <div className="flex flex-col gap-2 w-full">
-        {message.parts.map((part, index) => {
-          if (isToolUIPart(part)) {
-            if (part.type === "dynamic-tool") {
-              return null;
+    // ── User role: render every part inside a single shared bubble ──────────
+    //
+    // A user turn is conceptually one message even when it carries multiple
+    // parts (e.g. `[data-slash-command, text]` for `/zcf:workflow 你好`). To
+    // make that feel like one message we render all in-bubble parts inside a
+    // single <MessageContent>, sharing one bubble background. Out-of-bubble
+    // parts (file attachments, rewind actions, remote source label) sit
+    // outside the bubble but inside the same <Message> wrapper so they stay
+    // associated with the turn.
+    if (message.role === "user") {
+      const lastText = lastTextIndex >= 0 ? message.parts[lastTextIndex] : undefined;
+      const lastTextStripped =
+        lastText && lastText.type === "text" ? stripInterruptedMarker(lastText.text) : null;
+      const interrupted = lastTextStripped?.interrupted ?? false;
+      const remoteSource = lastTextIndex >= 0 ? message.metadata?.source : undefined;
+      const canShowUserActions = !!sessionId;
+
+      // Collect parts that belong inside the shared bubble (slash + text).
+      const inBubbleNodes: ReactNode[] = [];
+      // Out-of-bubble parts (images / files) are rendered as siblings.
+      const sideBubbleNodes: ReactNode[] = [];
+
+      message.parts.forEach((part, index) => {
+        switch (part.type) {
+          case "data-slash-command": {
+            const data = (part as { data: SlashCommandData }).data;
+            inBubbleNodes.push(
+              <SlashCommandBlock key={`${message.id}-${index}`} data={data} variant="inline" />,
+            );
+            return;
+          }
+          case "text": {
+            const { text: displayText } = stripInterruptedMarker(part.text);
+            if (displayText.trim().length === 0) return;
+            // Render as inline span (not <p>) so it sits on the same line as
+            // any adjacent slash-command chip — matches the input box, where
+            // `/cmd args` flows inline with surrounding text.
+            inBubbleNodes.push(
+              <span
+                key={`${message.id}-${index}`}
+                data-key={`${message.id}-${index}`}
+                className="whitespace-pre-wrap"
+              >
+                {displayText}
+              </span>,
+            );
+            return;
+          }
+          case "file": {
+            if (isImageFilePart(part)) {
+              if (index !== firstImageIndex) return;
+              sideBubbleNodes.push(
+                <div key={`${message.id}-files`} className="flex flex-wrap gap-1.5 justify-end">
+                  {imageFileParts.map((img, i) => (
+                    <img
+                      key={`${message.id}-img-${i}`}
+                      src={img.url}
+                      alt={img.filename ?? ""}
+                      className="h-20 w-20 rounded-lg object-cover ring-1 ring-border/50"
+                    />
+                  ))}
+                  {nonImageFileParts.map((f, i) => (
+                    <div
+                      key={`${message.id}-file-${i}`}
+                      className="flex items-center gap-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs"
+                    >
+                      <span className="truncate max-w-[180px] text-muted-foreground">
+                        {f.filename ?? "file"}
+                      </span>
+                    </div>
+                  ))}
+                </div>,
+              );
             }
+            return;
+          }
+          default:
+            return;
+        }
+      });
+
+      const hasBubbleContent = inBubbleNodes.length > 0 || interrupted;
+
+      return (
+        <Message from="user" className="gap-1">
+          {sideBubbleNodes}
+          {hasBubbleContent && (
+            <MessageContent>
+              {inBubbleNodes.length > 0 && (
+                // Wrap in a non-flex block so inline children (text spans +
+                // slash-command chips) flow on the same line, matching the
+                // input box. Without this, MessageContent's `flex-col` would
+                // stack each part on its own row.
+                <div className="leading-relaxed">{inBubbleNodes}</div>
+              )}
+              {interrupted && (
+                <p
+                  className={cn(
+                    "text-xs italic text-muted-foreground/70",
+                    inBubbleNodes.length > 0 && "mt-1",
+                  )}
+                >
+                  {t("chat.messages.interruptedByUser")}
+                </p>
+              )}
+            </MessageContent>
+          )}
+          {remoteSource && (
+            <span className="mt-1 ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
+              <SendIcon className="size-2.5" />
+              {remoteSource.platform.charAt(0).toUpperCase() + remoteSource.platform.slice(1)}
+            </span>
+          )}
+          {canShowUserActions && (
+            <MessageActions className="mt-1 ml-auto">
+              <MessageRewindButton
+                sessionId={sessionId!}
+                messageId={message.id}
+                disabled={isStreaming}
+              />
+            </MessageActions>
+          )}
+        </Message>
+      );
+    }
+
+    // ── Assistant role: each part renders as its own block ──────────────────
+    //
+    // Assistant turns mix reasoning / tools / text, so we keep per-part
+    // <Message> wrapping (or block-level nodes for tools/reasoning).
+    const renderPart = (part: ClaudeCodeUIMessage["parts"][number], index: number): ReactNode => {
+      if (isToolUIPart(part)) {
+        if (part.type === "dynamic-tool") {
+          return null;
+        }
+        return (
+          <ErrorBoundary key={part.toolCallId} fallback={<ToolPartErrorFallback />}>
+            <div data-key={part.toolCallId}>{renderToolPart(message, part)}</div>
+          </ErrorBoundary>
+        );
+      }
+
+      switch (part.type) {
+        case "data-compact-summary": {
+          const data = (part as { data: CompactSummaryData }).data;
+          return <CompactSummaryBlock key={`${message.id}-${index}`} data={data} />;
+        }
+        case "text": {
+          const { text: displayText, interrupted } = stripInterruptedMarker(part.text);
+          const isLastText = index === lastTextIndex;
+          const hasText = displayText.trim().length > 0;
+          const canShowAssistantActions = showActions && isComplete && isLastText && hasText;
+          return (
+            <Message
+              key={`${message.id}-${index}`}
+              data-key={`${message.id}-${index}`}
+              from={message.role}
+            >
+              <MessageContent>
+                {hasText && (
+                  <MessageResponse components={markdownComponents}>{displayText}</MessageResponse>
+                )}
+                {interrupted && (
+                  <p className={cn("text-xs italic text-muted-foreground/70", hasText && "mt-1")}>
+                    {t("chat.messages.interruptedByUser")}
+                  </p>
+                )}
+              </MessageContent>
+              {canShowAssistantActions && (
+                <MessageActions className="mt-2">
+                  <CopyMarkdownButton text={displayText} />
+                </MessageActions>
+              )}
+            </Message>
+          );
+        }
+        case "reasoning":
+          if (!isReasoningUIPart(part)) {
+            return null;
+          }
+          return (
+            <Reasoning
+              key={`${message.id}-${index}`}
+              data-key={`${message.id}-${index}`}
+              className="w-full mb-0"
+              isStreaming={part.state === "streaming"}
+            >
+              <ReasoningTrigger className="italic" />
+              <ReasoningContent className="pl-6">{part.text}</ReasoningContent>
+            </Reasoning>
+          );
+        case "file":
+          // Assistant-emitted images (rare). Render all together at first image position.
+          if (isImageFilePart(part)) {
+            if (index !== firstImageIndex) return null;
             return (
-              <ErrorBoundary key={part.toolCallId} fallback={<ToolPartErrorFallback />}>
-                <div data-key={part.toolCallId}>{renderToolPart(message, part)}</div>
-              </ErrorBoundary>
+              <div key={`${message.id}-files`} className="flex flex-wrap gap-1.5">
+                {imageFileParts.map((img, i) => (
+                  <img
+                    key={`${message.id}-img-${i}`}
+                    src={img.url}
+                    alt={img.filename ?? ""}
+                    className="h-20 w-20 rounded-lg object-cover ring-1 ring-border/50"
+                  />
+                ))}
+                {nonImageFileParts.map((f, i) => (
+                  <div
+                    key={`${message.id}-file-${i}`}
+                    className="flex items-center gap-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs"
+                  >
+                    <span className="truncate max-w-[180px] text-muted-foreground">
+                      {f.filename ?? "file"}
+                    </span>
+                  </div>
+                ))}
+              </div>
             );
           }
+          return null;
+        default:
+          return null;
+      }
+    };
 
-          switch (part.type) {
-            case "data-compact-summary": {
-              const data = (part as { data: CompactSummaryData }).data;
-              return <CompactSummaryBlock key={`${message.id}-${index}`} data={data} />;
-            }
-            case "data-slash-command": {
-              const data = (part as { data: SlashCommandData }).data;
-              return (
-                <Message
-                  key={`${message.id}-${index}`}
-                  data-key={`${message.id}-${index}`}
-                  from={message.role}
-                >
-                  <MessageContent>
-                    <SlashCommandBlock data={data} />
-                  </MessageContent>
-                </Message>
-              );
-            }
-            case "text": {
-              const { text: displayText, interrupted } = stripInterruptedMarker(part.text);
-              const isLastText = index === lastTextIndex;
-              const hasText = displayText.trim().length > 0;
-              const canShowAssistantActions =
-                message.role === "assistant" && showActions && isComplete && isLastText && hasText;
-              const canShowUserActions = message.role === "user" && isLastText && !!sessionId;
-              const remoteSource = isLastText ? message.metadata?.source : undefined;
-              return (
-                <Message
-                  key={`${message.id}-${index}`}
-                  data-key={`${message.id}-${index}`}
-                  from={message.role}
-                >
-                  <MessageContent>
-                    {hasText &&
-                      (message.role === "assistant" ? (
-                        <MessageResponse components={markdownComponents}>
-                          {displayText}
-                        </MessageResponse>
-                      ) : (
-                        <p className="m-0 whitespace-pre-wrap">{displayText}</p>
-                      ))}
-                    {interrupted && (
-                      <p
-                        className={cn("text-xs italic text-muted-foreground/70", hasText && "mt-1")}
-                      >
-                        {t("chat.messages.interruptedByUser")}
-                      </p>
-                    )}
-                  </MessageContent>
-                  {remoteSource && (
-                    <span className="mt-1 ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
-                      <SendIcon className="size-2.5" />
-                      {remoteSource.platform.charAt(0).toUpperCase() +
-                        remoteSource.platform.slice(1)}
-                    </span>
-                  )}
-                  {canShowAssistantActions && (
-                    <MessageActions className="mt-2">
-                      <CopyMarkdownButton text={displayText} />
-                    </MessageActions>
-                  )}
-                  {canShowUserActions && (
-                    <MessageActions className="mt-1 ml-auto">
-                      <MessageRewindButton
-                        sessionId={sessionId!}
-                        messageId={message.id}
-                        disabled={isStreaming}
-                      />
-                    </MessageActions>
-                  )}
-                </Message>
-              );
-            }
-            case "reasoning":
-              if (!isReasoningUIPart(part)) {
-                return null;
-              }
-              return (
-                <Reasoning
-                  key={`${message.id}-${index}`}
-                  data-key={`${message.id}-${index}`}
-                  className="w-full mb-0"
-                  isStreaming={part.state === "streaming"}
-                >
-                  <ReasoningTrigger className="italic" />
-                  <ReasoningContent className="pl-6">{part.text}</ReasoningContent>
-                </Reasoning>
-              );
-            case "file":
-              // Render all images together at first image position
-              if (isImageFilePart(part)) {
-                if (index !== firstImageIndex) return null;
-                return (
-                  <div
-                    key={`${message.id}-files`}
-                    className={cn(
-                      "flex flex-wrap gap-1.5",
-                      message.role === "user" && "justify-end",
-                    )}
-                  >
-                    {imageFileParts.map((img, i) => (
-                      <img
-                        key={`${message.id}-img-${i}`}
-                        src={img.url}
-                        alt={img.filename ?? ""}
-                        className="h-20 w-20 rounded-lg object-cover ring-1 ring-border/50"
-                      />
-                    ))}
-                    {nonImageFileParts.map((f, i) => (
-                      <div
-                        key={`${message.id}-file-${i}`}
-                        className="flex items-center gap-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs"
-                      >
-                        <span className="truncate max-w-[180px] text-muted-foreground">
-                          {f.filename ?? "file"}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                );
-              }
-              return null;
-            default:
-              return null;
-          }
-        })}
+    return (
+      <div className="flex flex-col gap-2 w-full">
+        {message.parts.map((part, index) => renderPart(part, index))}
       </div>
     );
   },

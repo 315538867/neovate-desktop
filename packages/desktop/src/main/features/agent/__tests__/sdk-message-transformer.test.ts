@@ -1006,10 +1006,14 @@ describe("SDKMessageTransformer", () => {
       ),
     );
 
+    // The CLI protocol parser yields parts with a per-part derived id so that
+    // multiple text segments in one message don't collide in
+    // process-ui-message-stream's `activeTextParts` map. Single-part text
+    // therefore appears as `${uuid}-text-0`.
     expect(chunks).toEqual([
-      { type: "text-start", id: "user-agent" },
-      { type: "text-delta", id: "user-agent", delta: "I will start with a glob search." },
-      { type: "text-end", id: "user-agent" },
+      { type: "text-start", id: "user-agent-text-0" },
+      { type: "text-delta", id: "user-agent-text-0", delta: "I will start with a glob search." },
+      { type: "text-end", id: "user-agent-text-0" },
     ]);
   });
 

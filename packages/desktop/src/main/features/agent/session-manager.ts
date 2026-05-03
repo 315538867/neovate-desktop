@@ -42,6 +42,7 @@ import type { ConfigStore } from "../config/config-store";
 import type { ProjectStore } from "../project/project-store";
 import type { RequestTracker } from "./request-tracker";
 
+import { extractReadableUserText } from "../../../shared/claude-code/extract-readable-user-text";
 import { lookupContextWindow } from "../../../shared/claude-code/model-context-windows";
 import { APP_DATA_DIR } from "../../core/app-paths";
 import { PowerBlockerService } from "../../core/power-blocker-service";
@@ -1178,11 +1179,12 @@ export class SessionManager {
     if (!session) throw new Error(`Unknown session: ${sessionId}`);
     if (session.consumeExited) throw new Error(`Session consume loop has exited: ${sessionId}`);
 
-    // UIMessage -> SDKUserMessage: extract text + image parts
-    const text = message.parts
-      .filter((p): p is { type: "text"; text: string } => p.type === "text")
-      .map((p) => p.text)
-      .join("");
+    // UIMessage -> SDKUserMessage: collapse text + slash-command parts back to
+    // their plain-text form (e.g. `data-slash-command{name:"zcf:workflow"}` →
+    // `/zcf:workflow`). Filtering by `type:"text"` here would silently drop the
+    // command name, causing the SDK to receive only the trailing args and never
+    // recognise the slash command on either expansion or persistence.
+    const text = extractReadableUserText(message.parts);
 
     // Emit lifecycle "created" on first message (not on createSession, so empty sessions don't appear)
     if (!this.emittedCreatedSessions.has(sessionId)) {

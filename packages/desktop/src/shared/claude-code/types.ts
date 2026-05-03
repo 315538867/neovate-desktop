@@ -49,6 +49,29 @@ type DataTypes = {
     durationMs?: number;
     summaryRaw: string;
   };
+  /**
+   * Domain event for slash commands the user issued.
+   *
+   * Claude Code CLI rewrites such user inputs into a private XML envelope
+   * (e.g. `<command-name>/model</command-name><command-args>...</command-args>`)
+   * when persisting to jsonl. We translate that envelope at the protocol-↔-
+   * semantic boundary so downstream consumers (renderer / sidebar / rewind)
+   * never see the raw XML.
+   */
+  "slash-command": {
+    /** Command name without the leading slash (e.g. "model", "zcf:workflow"). */
+    name: string;
+    /** Original `<command-message>` content, often a human-readable label. */
+    message?: string;
+    /** Original `<command-args>` content, the user-supplied arguments. */
+    args?: string;
+    /** Free text that immediately follows the command in the same user turn. */
+    extraText?: string;
+    /** Synchronous CLI side-effect output (`<local-command-stdout>`). */
+    stdout?: string;
+    /** CLI advisory text (`<local-command-caveat>`). */
+    caveat?: string;
+  };
   "result/success": SDKResultSuccess;
 } & { [K in SDKResultError["subtype"] as `result/${K}`]: SDKResultError };
 

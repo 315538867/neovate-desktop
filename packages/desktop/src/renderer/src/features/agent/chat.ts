@@ -18,6 +18,7 @@ import type {
 } from "../../../../shared/claude-code/types";
 import type { ClaudeCodeChatTransport } from "./chat-transport";
 
+import { extractReadableUserText } from "../../../../shared/claude-code/extract-readable-user-text";
 import { ClaudeCodeChatState, ClaudeCodeChatStoreState } from "./chat-state";
 import {
   createStreamingUIMessageState,
@@ -148,10 +149,9 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
   async #handleMessage(message: ClaudeCodeUIEvent) {
     if (message.kind === "user_message") {
       this.#state.pushMessage(message.message);
-      const text = message.message.parts
-        .filter((p): p is { type: "text"; text: string } => p.type === "text")
-        .map((p) => p.text)
-        .join("");
+      // Sidebar/title needs the human-recognisable form: text parts verbatim,
+      // slash-command parts collapsed to `/cmd args`. See helper for details.
+      const text = extractReadableUserText(message.message.parts);
       if (text) {
         useAgentStore.getState().addUserMessage(this.id, text);
       }
@@ -271,13 +271,18 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
       const fileParts: FileUIPart[] = Array.isArray(message.files)
         ? message.files
         : await convertFileListToFileUIParts(message.files);
+      // Caller may pre-compute structured parts (e.g. data-slash-command from
+      // the input editor) so the optimistic message matches the shape
+      // `parseCliUserContent` produces on replay. When provided, use them in
+      // place of the synthesized `[{type:"text"}]` part.
+      const explicitParts = (message as { parts?: ClaudeCodeUIMessage["parts"] }).parts;
+      const textParts =
+        explicitParts ??
+        ("text" in message && message.text != null
+          ? [{ type: "text" as const, text: message.text }]
+          : []);
       uiMessage = {
-        parts: [
-          ...fileParts,
-          ...("text" in message && message.text != null
-            ? [{ type: "text" as const, text: message.text }]
-            : []),
-        ],
+        parts: [...fileParts, ...textParts] as ClaudeCodeUIMessage["parts"],
       };
     } else {
       uiMessage = message;

@@ -29,7 +29,7 @@ import { useNewSession } from "../hooks/use-new-session";
 import { useSessionLifecycleSubscription } from "../hooks/use-session-lifecycle-subscription";
 import { BranchSwitcher } from "./branch-switcher";
 import { ContextLeft } from "./context-left";
-import { MessageInput } from "./message-input";
+import { MessageInput, type SendParts } from "./message-input";
 import { MessageParts } from "./message-parts";
 import { PermissionDialog } from "./permission-dialog";
 import { TaskProgress } from "./task-progress";
@@ -191,21 +191,27 @@ export function AgentChat() {
       });
   }, [activeProjectPath, createNewSession, setSessionInitError]);
 
-  const handleSend = (message: string, attachments?: FileAttachment[]) => {
+  const handleSend = (message: string, attachments?: FileAttachment[], parts?: SendParts) => {
     chatLog(
-      "handleSend: sessionId=%s msgLen=%d attachments=%d",
+      "handleSend: sessionId=%s msgLen=%d attachments=%d hasParts=%s",
       activeSessionId?.slice(0, 8) ?? "new",
       message.length,
       attachments?.length ?? 0,
+      parts ? "yes" : "no",
     );
     if (!activeSessionId) return;
     useAgentStore.getState().addUserMessage(activeSessionId, message);
     const files = attachmentsToFileParts(attachments);
+    // Cast: `parts` is consumed by our overridden _sendMessage but isn't part of
+    // AI SDK's sendMessage input type. See chat.ts _sendMessage for the read side.
     claudeCodeChatManager.getChat(activeSessionId)?.sendMessage({
       text: message,
       files: files.length > 0 ? files : undefined,
+      parts,
       metadata: { sessionId: activeSessionId, parentToolUseId: null },
-    });
+    } as Parameters<
+      NonNullable<ReturnType<typeof claudeCodeChatManager.getChat>>["sendMessage"]
+    >[0]);
 
     // This handleSend is only reachable from the welcome panel (isNew state).
     // Pre-warm a replacement session in the background for the next "New Chat".
@@ -315,19 +321,22 @@ function AgentChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }
     [messages, status, sessionId],
   );
 
-  const handleSend = (text: string, attachments?: FileAttachment[]) => {
+  const handleSend = (text: string, attachments?: FileAttachment[], parts?: SendParts) => {
     chatLog(
-      "handleSend: sessionId=%s msgLen=%d attachments=%d",
+      "handleSend: sessionId=%s msgLen=%d attachments=%d hasParts=%s",
       sessionId.slice(0, 8),
       text.length,
       attachments?.length ?? 0,
+      parts ? "yes" : "no",
     );
     const files = attachmentsToFileParts(attachments);
+    // Cast: see comment on the welcome-panel handleSend above.
     sendMessage({
       text,
       files: files.length > 0 ? files : undefined,
+      parts,
       metadata: { sessionId, parentToolUseId: null },
-    });
+    } as Parameters<typeof sendMessage>[0]);
     // Smooth scroll to bottom when user sends a new message
     conversationContextRef.current?.scrollToBottom("smooth");
   };

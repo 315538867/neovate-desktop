@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import type { RewindFilesResult } from "../../../../../shared/features/agent/types";
 
+import { extractReadableUserText } from "../../../../../shared/claude-code/extract-readable-user-text";
 import { Popover, PopoverPopup, PopoverTrigger } from "../../../components/ui/popover";
 import { toastManager } from "../../../components/ui/toast";
 import {
@@ -115,8 +116,10 @@ export function MessageRewindButton({ sessionId, messageId, disabled }: Props) {
         const chat = claudeCodeChatManager.getChat(sessionId);
         const messages = chat?.store.getState().messages ?? [];
         const targetMessage = messages.find((m) => m.id === messageId);
-        const textPart = targetMessage?.parts.find((p) => p.type === "text");
-        const prefillText = textPart && "text" in textPart ? textPart.text : "";
+        // Prefill the input with the user-recognisable form: text verbatim,
+        // slash commands collapsed back to `/cmd args` so re-submitting
+        // produces the same intent.
+        const prefillText = extractReadableUserText(targetMessage?.parts);
 
         // Interrupt if agent is active
         const status = chat?.store.getState().status;

@@ -15,6 +15,7 @@ import type {
   ClaudeCodeUIEvent,
 } from "../../../shared/claude-code/types";
 
+import { parseCliUserContent } from "../../../shared/claude-code/parse-cli-user-content";
 import { EditOutputSchema } from "../../../shared/claude-code/tools/edit";
 import { ReadOutputSchema } from "../../../shared/claude-code/tools/read";
 
@@ -697,13 +698,15 @@ export class SDKMessageTransformer {
     const message = msg as any;
     const content = message.message?.content;
 
+    // Translate the CLI's external XML envelope (slash commands) into our
+    // internal domain events here, so the live-stream path mirrors the
+    // jsonl-restore path. Both inbound paths must produce the same
+    // `data-slash-command` parts for downstream consumers.
     if (typeof content === "string") {
       if (this.shouldSkipNestedPromptText(msg.parent_tool_use_id, content)) {
         return;
       }
-      yield { type: "text-start", id: message.uuid };
-      yield { type: "text-delta", id: message.uuid, delta: content };
-      yield { type: "text-end", id: message.uuid };
+      yield* this.emitParsedUserText(content, message.uuid);
       return;
     }
 
@@ -734,11 +737,35 @@ export class SDKMessageTransformer {
           if (this.shouldSkipNestedPromptText(msg.parent_tool_use_id, part.text)) {
             break;
           }
-          yield { type: "text-start", id: message.uuid };
-          yield { type: "text-delta", id: message.uuid, delta: part.text };
-          yield { type: "text-end", id: message.uuid };
+          yield* this.emitParsedUserText(part.text, message.uuid);
           break;
         }
+      }
+    }
+  }
+
+  /**
+   * Parse a raw user text payload through the CLI protocol→semantic translator
+   * and yield the corresponding chunks (text and/or `data-slash-command`).
+   * Empty input emits nothing — callers should pre-skip if they want a
+   * different fallback.
+   */
+  private *emitParsedUserText(text: string, uuid: string): Generator<ClaudeCodeUIMessageChunk> {
+    const parsed = parseCliUserContent(text);
+    if (parsed.parts.length === 0) return;
+    let counter = 0;
+    for (const part of parsed.parts) {
+      if (part.type === "data-slash-command") {
+        yield {
+          type: "data-slash-command",
+          id: `${uuid}-cmd-${counter++}`,
+          data: part.data,
+        };
+      } else if (part.type === "text") {
+        const textId = `${uuid}-text-${counter++}`;
+        yield { type: "text-start", id: textId };
+        yield { type: "text-delta", id: textId, delta: part.text };
+        yield { type: "text-end", id: textId };
       }
     }
   }

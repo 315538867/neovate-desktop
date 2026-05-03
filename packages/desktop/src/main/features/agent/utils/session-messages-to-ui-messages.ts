@@ -4,6 +4,7 @@ import debug from "debug";
 
 import type { ClaudeCodeUIMessage } from "../../../../shared/claude-code/types";
 
+import { parseCliUserContent } from "../../../../shared/claude-code/parse-cli-user-content";
 import { extractTextFromUserContent, isCompactSummaryText } from "./compact-detection";
 import {
   readCompactMetaFromJsonl,
@@ -235,49 +236,20 @@ export async function sessionMessagesToUIMessages(
 
     if (isHumanPrompt) {
       await flushBatch();
-      const parts: ClaudeCodeUIMessage["parts"] = [];
-
-      if (typeof content === "string") {
-        parts.push({
-          type: "text",
-          text: content,
-          state: "done",
-        } as ClaudeCodeUIMessage["parts"][number]);
-      } else if (Array.isArray(content)) {
-        const textStr = content
-          .filter((b: { type: string }) => b.type === "text")
-          .map((b: { type: string; text?: string }) => b.text ?? "")
-          .join("");
-        if (textStr) {
-          parts.push({
-            type: "text",
-            text: textStr,
-            state: "done",
-          } as ClaudeCodeUIMessage["parts"][number]);
-        }
-        for (const b of content) {
-          const block = b as {
-            type: string;
-            source?: { type: string; media_type?: string; data?: string };
-          };
-          if (block.type === "image" && block.source?.type === "base64") {
-            const mediaType = block.source.media_type ?? "image/png";
-            parts.push({
-              type: "file",
-              mediaType,
-              url: `data:${mediaType};base64,${block.source.data}`,
-            } as ClaudeCodeUIMessage["parts"][number]);
-          }
-        }
-      }
-
-      if (parts.length === 0) {
-        parts.push({
-          type: "text",
-          text: typeof content === "string" ? content : "",
-          state: "done",
-        } as ClaudeCodeUIMessage["parts"][number]);
-      }
+      // Translate the CLI's external protocol (raw text plus private XML
+      // envelopes for slash commands) into our internal domain model so
+      // downstream renderers never deal with raw `<command-*>` tags.
+      const parsed = parseCliUserContent(content);
+      const parts: ClaudeCodeUIMessage["parts"] =
+        parsed.parts.length > 0
+          ? (parsed.parts as ClaudeCodeUIMessage["parts"])
+          : ([
+              {
+                type: "text",
+                text: typeof content === "string" ? content : "",
+                state: "done",
+              },
+            ] as ClaudeCodeUIMessage["parts"]);
 
       results.push({
         id: msg.uuid ?? crypto.randomUUID(),

@@ -8,7 +8,7 @@ import type { ConversationHandle } from "../../components/ai-elements/conversati
 import { Conversation, ConversationScrollButton } from "../../components/ai-elements/conversation";
 import { Button } from "../../components/ui/button";
 import { claudeCodeChatManager } from "../../features/agent/chat-manager";
-import { MessageInput } from "../../features/agent/components/message-input";
+import { MessageInput, type SendParts } from "../../features/agent/components/message-input";
 import { MessageParts } from "../../features/agent/components/message-parts";
 import { PermissionDialog } from "../../features/agent/components/permission-dialog";
 import { TaskProgress } from "../../features/agent/components/task-progress";
@@ -241,17 +241,22 @@ function PopupInputMode({
   const activeSessionId = useAgentStore((s) => s.activeSessionId);
 
   const handleSend = useCallback(
-    (message: string, attachments?: FileAttachment[]) => {
+    (message: string, attachments?: FileAttachment[], parts?: SendParts) => {
       if (!activeSessionId) return;
       log("sending message: sessionId=%s", activeSessionId.slice(0, 8));
 
       useAgentStore.getState().addUserMessage(activeSessionId, message);
       const files = attachmentsToFileParts(attachments);
+      // Cast: `parts` is read by our overridden _sendMessage in chat.ts but
+      // isn't declared in AI SDK's sendMessage input type.
       claudeCodeChatManager.getChat(activeSessionId)?.sendMessage({
         text: message,
         files: files.length > 0 ? files : undefined,
+        parts,
         metadata: { sessionId: activeSessionId, parentToolUseId: null },
-      });
+      } as Parameters<
+        NonNullable<ReturnType<typeof claudeCodeChatManager.getChat>>["sendMessage"]
+      >[0]);
 
       // Notify main window
       postCrossWindowMessage({
@@ -311,14 +316,16 @@ function PopupChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }
   );
 
   const handleSend = useCallback(
-    (text: string, attachments?: FileAttachment[]) => {
+    (text: string, attachments?: FileAttachment[], parts?: SendParts) => {
       log("follow-up: sessionId=%s", sessionId.slice(0, 8));
       const files = attachmentsToFileParts(attachments);
+      // Cast: see comment on the popup-input handleSend above.
       sendMessage({
         text,
         files: files.length > 0 ? files : undefined,
+        parts,
         metadata: { sessionId, parentToolUseId: null },
-      });
+      } as Parameters<typeof sendMessage>[0]);
       conversationContextRef.current?.scrollToBottom("smooth");
     },
     [sessionId, sendMessage],

@@ -19,6 +19,7 @@ import { claudeCodeChatManager } from "../chat-manager";
 import { useNewSession } from "../hooks/use-new-session";
 import { useSessionMeta } from "../hooks/use-session-meta";
 import { useAgentStore } from "../store";
+import { extractParts, type ExtractedSendable } from "../utils/extract-parts";
 import { extractText } from "../utils/extract-text";
 import { buildInsertChatContent, type InsertChatDetail } from "../utils/insert-chat";
 import { readFileAsAttachment } from "../utils/read-file-as-attachment";
@@ -32,8 +33,13 @@ import { createSlashCommandsExtension } from "./slash-commands-extension";
 
 const log = debug("neovate:message-input");
 
+/** Optional structured parts derived from the TipTap doc. The send pipeline
+ *  uses these to emit `data-slash-command` parts for the optimistic message,
+ *  matching what the SDK transformer produces on replay. */
+export type SendParts = ExtractedSendable["parts"];
+
 type Props = {
-  onSend: (message: string, attachments?: FileAttachment[]) => void;
+  onSend: (message: string, attachments?: FileAttachment[], parts?: SendParts) => void;
   onCancel: () => void;
   streaming: boolean;
   disabled?: boolean;
@@ -338,7 +344,8 @@ export function MessageInput({
 
   const send = useEventCallback(() => {
     if (!editor || streaming) return;
-    let text = extractText(editor.getJSON());
+    const extracted = extractParts(editor.getJSON());
+    let text = extracted.text;
     const allAttachments = attachmentsRef.current;
     log(
       "send: text=%s attachments.length=%d ids=%o",
@@ -366,6 +373,13 @@ export function MessageInput({
     const textAttachments = allAttachments.filter((a) => a.category === "text");
     const mediaAttachments = allAttachments.filter((a) => a.category !== "text");
 
+    // Always pass the structured parts: `extractParts` produces the canonical
+    // shape (text/slash-command/etc.) that downstream code (`chat.ts` optimistic
+    // push, `session-manager.send` collapsing back to a flat string via
+    // `extractReadableUserText`) handles uniformly. The previous
+    // `hasSlashCommand ? parts : undefined` gated this on slash commands only,
+    // forcing two divergent code paths.
+    let parts: typeof extracted.parts = extracted.parts;
     if (textAttachments.length > 0) {
       const codeBlocks = textAttachments
         .map((a) => {
@@ -375,9 +389,19 @@ export function MessageInput({
         })
         .join("\n\n");
       text = text ? `${text}\n\n${codeBlocks}` : codeBlocks;
+      // Mirror the string append in the structured parts so the optimistic
+      // render still shows the code fences.
+      parts = [
+        ...parts,
+        {
+          type: "text",
+          text: parts.length > 0 ? `\n\n${codeBlocks}` : codeBlocks,
+          state: "done",
+        } as (typeof parts)[number],
+      ];
     }
 
-    onSend(text, mediaAttachments.length > 0 ? mediaAttachments : undefined);
+    onSend(text, mediaAttachments.length > 0 ? mediaAttachments : undefined, parts);
     editor.commands.clearContent();
     setAttachments([]);
     if (activeSessionId) sessionDrafts.delete(activeSessionId);
