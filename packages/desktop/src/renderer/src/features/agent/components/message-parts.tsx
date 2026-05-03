@@ -32,14 +32,17 @@ import { cn } from "../../../lib/utils";
 import { useMarkdownComponents } from "../hooks/use-markdown-components";
 import { CompactSummaryBlock, type CompactSummaryData } from "./compact-summary-block";
 import { MessageRewindButton } from "./message-rewind-button";
+import { SlashCommandBlock, type SlashCommandData } from "./slash-command-block";
 import { useAssistantMessageSummaryCollapse } from "./use-assistant-message-summary-collapse";
 
 const INTERRUPTED_BY_USER_MARKER = "[Request interrupted by user]";
 
 function stripInterruptedMarker(text: string): { text: string; interrupted: boolean } {
-  const idx = text.lastIndexOf(INTERRUPTED_BY_USER_MARKER);
-  if (idx === -1) return { text, interrupted: false };
-  const before = text.slice(0, idx).trimEnd();
+  // SDK only appends this at the very end of the final assistant response text.
+  // Match strictly on the trailing position to avoid false positives when the
+  // phrase appears mid-content (e.g. in historical messages or code blocks).
+  if (!text.endsWith(INTERRUPTED_BY_USER_MARKER)) return { text, interrupted: false };
+  const before = text.slice(0, text.length - INTERRUPTED_BY_USER_MARKER.length).trimEnd();
   return { text: before, interrupted: true };
 }
 
@@ -258,6 +261,20 @@ export const MessagePartRenderer = memo(
             case "data-compact-summary": {
               const data = (part as { data: CompactSummaryData }).data;
               return <CompactSummaryBlock key={`${message.id}-${index}`} data={data} />;
+            }
+            case "data-slash-command": {
+              const data = (part as { data: SlashCommandData }).data;
+              return (
+                <Message
+                  key={`${message.id}-${index}`}
+                  data-key={`${message.id}-${index}`}
+                  from={message.role}
+                >
+                  <MessageContent>
+                    <SlashCommandBlock data={data} />
+                  </MessageContent>
+                </Message>
+              );
             }
             case "text": {
               const { text: displayText, interrupted } = stripInterruptedMarker(part.text);
