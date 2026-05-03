@@ -20,14 +20,10 @@ import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { usePinnedState } from "./use-pinned-state";
 
-// Public handle exposed via `contextRef` — replaces use-stick-to-bottom's
-// StickToBottomContext. Internally backed by react-virtuoso for windowed
-// rendering of long chat histories.
+// Public handle exposed via `contextRef`. Internally backed by react-virtuoso
+// for windowed rendering of long chat histories.
 export type ConversationHandle = {
   scrollToBottom: (behavior?: "smooth" | "auto") => void;
-  scrollTop: () => number;
-  scrollTo: (top: number) => void;
-  scrollerEl: () => HTMLElement | null;
 };
 
 type ConversationCtxValue = {
@@ -65,11 +61,10 @@ export const Conversation = forwardRef<HTMLDivElement, ConversationProps>(
   ({ items, className, contextRef, children }, _ref) => {
     const handle = useRef<VirtuosoHandle>(null);
     const scrollerRef = useRef<HTMLElement | null>(null);
-    const lastScrollTop = useRef(0);
     const [atBottom, setAtBottom] = useState(true);
 
     // User-intent layer: decoupled from Virtuoso's geometric atBottom.
-    // Truth source for whether new content should follow to bottom.
+    // Sole truth source for whether new content should follow to bottom.
     // Mutating isPinnedRef does not trigger re-renders; Virtuoso re-evaluates
     // the followOutput callback on every items change.
     const { isPinnedRef, pinToBottom } = usePinnedState(scrollerRef);
@@ -90,31 +85,25 @@ export const Conversation = forwardRef<HTMLDivElement, ConversationProps>(
       contextRef,
       () => ({
         scrollToBottom,
-        scrollTop: () => lastScrollTop.current,
-        scrollTo: (top: number) => {
-          scrollerRef.current?.scrollTo({ top });
-        },
-        scrollerEl: () => scrollerRef.current,
       }),
       [scrollToBottom],
     );
 
     // followOutput is a function so Virtuoso re-evaluates it per items change.
     // Returning "auto" (instant) avoids stacking smooth animations against the
-    // estimate→measure→correct cycle that produces visible flicker.
-    const followOutput = useCallback(() => {
-      return isPinnedRef.current ? ("auto" as const) : false;
-    }, []);
+    // estimate→measure→correct cycle that produces visible flicker. Reading
+    // `isPinnedRef` here (NOT the geometric atBottom) keeps follow intent
+    // stable across the SIZE_INCREASED measurement passes that briefly
+    // perturb geometric atBottom during streaming. `isPinnedRef` is a stable
+    // ref so this callback intentionally has no deps.
+    const followOutput = useCallback(() => (isPinnedRef.current ? ("auto" as const) : false), []);
 
-    // atBottom geometry ONLY drives UI (scroll-to-bottom button visibility).
-    // It does NOT drive follow intent — pin (isPinnedRef) is the single truth
-    // source, mutated by real user input events (wheel / touch / keyboard /
-    // scroll) inside usePinnedState. This decoupling is critical: during
-    // streaming the geometric atBottom thrashes within AT_BOTTOM_THRESHOLD as
-    // scrollHeight grows; if we re-pinned or imperatively realigned here, a
-    // user mid-scroll would be yanked back to bottom (visible flicker + jump).
-    // SIZE_INCREASED dead-locks are handled by the items.length useEffect
-    // below, which only fires when the user's pin intent is still ON.
+    // atBottom geometry is used ONLY to drive UI (scroll-to-bottom button
+    // visibility). It does NOT drive follow intent — the intent layer
+    // (`isPinnedRef` in usePinnedState) is mutated by real user input events
+    // and by `scrollend` settling at the bottom. We deliberately do NOT
+    // re-pin or imperatively realign here: doing so during streaming yanks
+    // a user mid-scroll back to the bottom (the bug history of this file).
     const onAtBottomStateChange = useCallback((b: boolean) => {
       if (atBottomLeaveTimerRef.current) {
         clearTimeout(atBottomLeaveTimerRef.current);
@@ -128,26 +117,6 @@ export const Conversation = forwardRef<HTMLDivElement, ConversationProps>(
         }, AT_BOTTOM_LEAVE_DEBOUNCE_MS);
       }
     }, []);
-
-    // Follow-intent realignment on new items.
-    // When the user has pin ON (intent to follow streaming output) but
-    // Virtuoso's internal shouldFollow is gated off (geometric atBottom=false
-    // due to a pending SIZE_INCREASED measurement, e.g. user expanded a
-    // reasoning block then dragged near bottom), Virtuoso's followOutput
-    // alone cannot recover. Force-align imperatively per items.length tick.
-    // Guard with isPinnedRef so we NEVER yank a user who is intentionally
-    // scrolled away.
-    const prevItemsLengthRef = useRef(items.length);
-    useEffect(() => {
-      const prev = prevItemsLengthRef.current;
-      prevItemsLengthRef.current = items.length;
-      if (items.length <= prev) return;
-      if (!isPinnedRef.current) return;
-      const last = items.length - 1;
-      if (last >= 0) {
-        handle.current?.scrollToIndex({ index: last, behavior: "auto", align: "end" });
-      }
-    }, [items.length]);
 
     useEffect(() => {
       return () => {
@@ -180,9 +149,6 @@ export const Conversation = forwardRef<HTMLDivElement, ConversationProps>(
             atBottomThreshold={AT_BOTTOM_THRESHOLD}
             increaseViewportBy={200}
             initialTopMostItemIndex={items.length > 0 ? items.length - 1 : 0}
-            onScroll={(e) => {
-              lastScrollTop.current = (e.currentTarget as HTMLElement).scrollTop;
-            }}
             components={{
               Header: () => <div className="h-3" />,
               Footer: () => <div className="h-3" />,

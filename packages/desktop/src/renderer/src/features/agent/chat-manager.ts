@@ -8,7 +8,6 @@ import { useConfigStore } from "../config/store";
 import { ClaudeCodeChat } from "./chat";
 import { ClaudeCodeChatTransport } from "./chat-transport";
 import { markTurnCompleted, clearTurnResult } from "./hooks/use-unseen-turn-result";
-import { scrollPositions } from "./scroll-positions";
 import { findPreWarmedSession, registerSessionInStore } from "./session-utils";
 import { useAgentStore } from "./store";
 
@@ -42,8 +41,6 @@ export class ClaudeCodeChatManager {
       const { activeSessionId } = useAgentStore.getState();
       if (activeSessionId !== id) {
         markTurnCompleted(id, result);
-        log("onTurnComplete: clearing scroll position for non-active session=%s", id.slice(0, 8));
-        scrollPositions.delete(id);
       }
     },
     onTurnStart: (id: string) => {
@@ -152,12 +149,9 @@ export class ClaudeCodeChatManager {
     await chat.stop();
     await chat.dispose();
     this.chats.delete(sessionId);
-    scrollPositions.delete(sessionId);
   }
 
   async removeSession(sessionId: string): Promise<void> {
-    log("removeSession: clearing scroll position for session=%s", sessionId.slice(0, 8));
-    scrollPositions.delete(sessionId);
     const chat = this.chats.get(sessionId);
     if (!chat) return;
 

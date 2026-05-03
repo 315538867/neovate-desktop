@@ -26,7 +26,6 @@ import { cn } from "../../../lib/utils";
 import { claudeCodeChatManager } from "../chat-manager";
 import { useClaudeCodeChat } from "../hooks/use-claude-code-chat";
 import { useNewSession } from "../hooks/use-new-session";
-import { useScrollPosition } from "../hooks/use-scroll-position";
 import { useSessionLifecycleSubscription } from "../hooks/use-session-lifecycle-subscription";
 import { BranchSwitcher } from "./branch-switcher";
 import { ContextLeft } from "./context-left";
@@ -298,8 +297,6 @@ function AgentChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }
 
   // Ref to access scroll context for smooth scrolling on new message
   const conversationContextRef = useRef<ConversationHandle | null>(null);
-
-  useScrollPosition(sessionId, conversationContextRef);
 
   const items = useMemo(
     () =>
