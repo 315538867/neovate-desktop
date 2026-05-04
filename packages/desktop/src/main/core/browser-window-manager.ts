@@ -81,7 +81,14 @@ export class BrowserWindowManager implements IBrowserWindowManager {
       ...(process.platform === "linux" ? { icon } : {}),
       webPreferences: {
         preload: join(__dirname, "../preload/index.js"),
+        // sandbox stays false: preload imports node:os (homedir) and we
+        // intentionally use Node APIs in the bridge.
         sandbox: false,
+        // Explicitly enforce the secure renderer defaults Electron now ships
+        // with, so a future Electron upgrade or an embedded preset cannot
+        // silently weaken them.
+        contextIsolation: true,
+        nodeIntegration: false,
         webviewTag: true,
       },
     });
@@ -105,6 +112,18 @@ export class BrowserWindowManager implements IBrowserWindowManager {
         log.debug("Blocked non-http URL from opening externally: %s", url);
       }
       return { action: "deny" };
+    });
+    // Force-strip Node integration on every embedded <webview>, regardless
+    // of what attributes the renderer markup sets. webview is enabled to host
+    // third-party browser/changes/editor plugins; without this, an attacker
+    // who controls the embedded URL could request nodeIntegration in the tag
+    // and execute Node in the child renderer.
+    win.webContents.on("will-attach-webview", (_e, webPreferences) => {
+      webPreferences.nodeIntegration = false;
+      webPreferences.nodeIntegrationInSubFrames = false;
+      webPreferences.contextIsolation = true;
+      webPreferences.sandbox = true;
+      delete webPreferences.preload;
     });
     // handle webview tag window opener
     win.webContents.on("did-attach-webview", (e, webContent) => {
@@ -260,6 +279,8 @@ export class BrowserWindowManager implements IBrowserWindowManager {
       webPreferences: {
         preload: join(__dirname, "../preload/index.js"),
         sandbox: false,
+        contextIsolation: true,
+        nodeIntegration: false,
         webviewTag: true,
       },
     });
