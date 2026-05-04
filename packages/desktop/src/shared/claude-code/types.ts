@@ -35,8 +35,6 @@ type Metadata = {
   deliveryMode?: "stream" | "restored";
   sessionId: string;
   parentToolUseId: string | null;
-  /** Present when the message was sent from a remote control platform (e.g. Telegram). */
-  source?: { platform: string };
 };
 
 type DataTypes = {

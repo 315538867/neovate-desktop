@@ -35,7 +35,6 @@ beforeEach(() => {
     mainApp: {} as any,
     stateStore: {} as any,
     updaterService: {} as any,
-    remoteControlService: {} as any,
   };
 });
 

@@ -11,7 +11,6 @@ import type { PluginsService } from "./features/claude-code-plugins/plugins-serv
 import type { ConfigStore } from "./features/config/config-store";
 import type { LlmService } from "./features/llm/llm-service";
 import type { ProjectStore } from "./features/project/project-store";
-import type { RemoteControlService } from "./features/remote-control/remote-control-service";
 import type { SkillsService } from "./features/skills/skills-service";
 import type { StateStore } from "./features/state/state-store";
 import type { UpdaterService } from "./features/updater/service";
@@ -25,7 +24,6 @@ import { electronRouter } from "./features/electron/router";
 import { llmRouter } from "./features/llm/router";
 import { projectRouter } from "./features/project/router";
 import { providerRouter } from "./features/provider/router";
-import { remoteControlRouter } from "./features/remote-control/router";
 import { rulesRouter } from "./features/rules/router";
 import { skillsRouter } from "./features/skills/router";
 import { statsRouter } from "./features/stats/router";
@@ -42,7 +40,6 @@ export type AppContext = {
   pluginsService: PluginsService;
   skillsService: SkillsService;
   stateStore: StateStore;
-  remoteControlService: RemoteControlService;
   updaterService: UpdaterService;
   mainApp: IMainApp;
   storage: StorageService;
@@ -60,7 +57,6 @@ export function buildRouter(pluginRouters: Contribution<AnyRouter>[]) {
     deeplink: deeplinkRouter,
     electron: electronRouter,
     llm: llmRouter,
-    remoteControl: remoteControlRouter,
     project: projectRouter,
     provider: providerRouter,
     rules: rulesRouter,

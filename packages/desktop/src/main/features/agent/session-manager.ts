@@ -119,7 +119,6 @@ export class SessionManager {
       providerId?: string;
       model?: string;
       createdAt: number;
-      source: SessionLifecycleEvent["source"];
       lastUserMessageId?: string;
       preTurnRef?: string;
       consumeExited: boolean;
@@ -253,7 +252,6 @@ export class SessionManager {
     cwd: string,
     model?: string,
     explicitProviderId?: string | null,
-    source: SessionLifecycleEvent["source"] = "local",
   ): Promise<
     {
       sessionId: string;
@@ -332,7 +330,6 @@ export class SessionManager {
     const initResult = await this.initSessionWithTimeout(sessionId, cwd, {
       model: modelSetting?.model,
       provider,
-      source,
     });
 
     return {
@@ -423,7 +420,6 @@ export class SessionManager {
       model?: string;
       resume?: string;
       provider?: Provider;
-      source?: SessionLifecycleEvent["source"];
     },
   ): Promise<Awaited<ReturnType<Query["initializationResult"]>>> {
     const input = new Pushable<SDKUserMessage>();
@@ -689,7 +685,6 @@ export class SessionManager {
       providerId: provider?.id,
       model: opts?.model,
       createdAt: Date.now(),
-      source: opts?.source ?? "local",
       consumeExited: false,
       uiToSdkMessageIds: new Map(),
       pendingRequests,
@@ -730,7 +725,6 @@ export class SessionManager {
       model?: string;
       resume?: string;
       provider?: Provider;
-      source?: SessionLifecycleEvent["source"];
     },
   ): Promise<Awaited<ReturnType<Query["initializationResult"]>>> {
     let timer: ReturnType<typeof setTimeout>;
@@ -1050,7 +1044,6 @@ export class SessionManager {
         updatedAt: now,
         title: forkTitle,
       },
-      source: "local",
     });
 
     log("forkSession: original=%s forked=%s", sessionId, result.sessionId);
@@ -1083,7 +1076,6 @@ export class SessionManager {
     this.emitLifecycle({
       type: "deleted",
       session: { sessionId, createdAt: now, updatedAt: now },
-      source: "local",
     });
   }
 
@@ -1173,7 +1165,6 @@ export class SessionManager {
   async send(
     sessionId: string,
     message: import("../../../shared/claude-code/types").ClaudeCodeUIMessage,
-    options?: { source?: { platform: string } },
   ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Unknown session: ${sessionId}`);
@@ -1199,7 +1190,6 @@ export class SessionManager {
           updatedAt: now,
           title: text.slice(0, 50),
         },
-        source: session.source,
       });
     }
 
@@ -1271,22 +1261,6 @@ export class SessionManager {
     // Track UI message ID → SDK UUID mapping for rewind
     if (message.id) {
       session.uiToSdkMessageIds.set(message.id, userMessageId);
-    }
-
-    // Publish external user message to renderer BEFORE pushing to SDK input,
-    // so the user bubble appears before assistant chunks start streaming.
-    if (options?.source) {
-      this.eventPublisher.publish(sessionId, {
-        kind: "user_message",
-        message: {
-          ...message,
-          metadata: {
-            sessionId,
-            parentToolUseId: null,
-            source: options.source,
-          },
-        },
-      });
     }
 
     this.requestTracker.startTurn(sessionId);

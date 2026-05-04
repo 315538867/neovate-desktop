@@ -111,8 +111,6 @@ export type SessionInfo = {
 export type SessionLifecycleEvent = {
   type: "created" | "deleted";
   session: SessionInfo;
-  /** Where the event originated */
-  source: "local" | "remote-control";
 };
 
 /** Active in-memory session from SessionManager */

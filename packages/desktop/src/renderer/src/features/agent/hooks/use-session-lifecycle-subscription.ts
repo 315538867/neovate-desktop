@@ -11,7 +11,7 @@ const log = debug("neovate:session-lifecycle");
 /**
  * Subscribes to session lifecycle events (created/deleted) from the main process.
  * Keeps the renderer's agentSessions list in sync when sessions are created or
- * deleted externally (e.g. via Telegram remote control).
+ * deleted externally.
  */
 export function useSessionLifecycleSubscription(cwd: string) {
   const appendAgentSession = useAgentStore((s) => s.appendAgentSession);
@@ -30,12 +30,7 @@ export function useSessionLifecycleSubscription(cwd: string) {
           iter = await client.agent.subscribeSessionLifecycle();
           for await (const event of iter) {
             if (cancelled) break;
-            log(
-              "event: type=%s sessionId=%s source=%s",
-              event.type,
-              event.session.sessionId,
-              event.source,
-            );
+            log("event: type=%s sessionId=%s", event.type, event.session.sessionId);
             if (event.type === "created") {
               appendAgentSession(event.session);
             } else if (event.type === "deleted") {

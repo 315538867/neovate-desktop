@@ -1,4 +1,4 @@
-import { ArrowLeft, BookOpen, Bot, HelpCircle, Keyboard, Radio, Server, Bolt } from "lucide-react";
+import { ArrowLeft, BookOpen, Bot, HelpCircle, Keyboard, Server, Bolt } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { SettingsMenuId } from "../store";
@@ -16,7 +16,6 @@ const menuItems: MenuItem[] = [
   { id: "agents", icon: Bot },
   { id: "providers", icon: Server },
   { id: "rules", icon: BookOpen },
-  { id: "remoteControl", icon: Radio },
   { id: "keybindings", icon: Keyboard },
   { id: "about", icon: HelpCircle },
 ];
@@ -25,7 +24,6 @@ const MENU_LABEL_KEYS = {
   general: "settings.general",
   agents: "settings.agents",
   providers: "settings.providers",
-  remoteControl: "settings.remoteControl",
   rules: "settings.rules",
   keybindings: "settings.keybindings",
   about: "settings.about",

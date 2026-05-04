@@ -18,10 +18,6 @@ import { ConfigStore } from "./features/config/config-store";
 import { LlmService } from "./features/llm/llm-service";
 import { PopupWindowShortcut } from "./features/popup-window/global-shortcut";
 import { ProjectStore } from "./features/project/project-store";
-import { DingTalkAdapter } from "./features/remote-control/platforms/dingtalk";
-import { TelegramAdapter } from "./features/remote-control/platforms/telegram";
-import { WeChatAdapter } from "./features/remote-control/platforms/wechat";
-import { RemoteControlService } from "./features/remote-control/remote-control-service";
 import { SkillsService } from "./features/skills/skills-service";
 import { StateStore } from "./features/state/state-store";
 import { UpdaterService } from "./features/updater/service";
@@ -109,16 +105,6 @@ const updaterService = new UpdaterService({
 });
 const pluginsService = new PluginsService();
 const skillsService = new SkillsService(projectStore, configStore, process.resourcesPath);
-const remoteControlService = new RemoteControlService(
-  sessionManager,
-  projectStore,
-  mainApp.getStorage(),
-  requestTracker,
-  configStore,
-);
-remoteControlService.registerAdapter(new TelegramAdapter());
-remoteControlService.registerAdapter(new DingTalkAdapter());
-remoteControlService.registerAdapter(new WeChatAdapter());
 
 const appContext: AppContext = {
   sessionManager,
@@ -129,7 +115,6 @@ const appContext: AppContext = {
   pluginsService,
   skillsService,
   stateStore,
-  remoteControlService,
   updaterService,
   mainApp,
   storage: mainApp.getStorage(),
@@ -174,9 +159,6 @@ app.whenReady().then(async () => {
   await mainApp.start();
   startupLog("mainApp.start done %s", elapsed());
   void updaterService.init();
-
-  // Start remote control platform adapters (fire-and-forget — must not block window)
-  void remoteControlService.startEnabledAdapters();
 
   // Setup application menu (for menu items, shortcuts handled in renderer)
   menu = new ApplicationMenu(updaterService, configStore);
@@ -231,11 +213,6 @@ app.whenReady().then(async () => {
 
     llmService.dispose();
     qel("llmService.dispose");
-
-    void remoteControlService
-      .notifyShutdown()
-      .then(() => remoteControlService.stopAll())
-      .then(() => qel("remoteControlService.stopAll DONE"));
 
     const sessCount = sessionManager.getActiveSessions().length;
     startupLog("QUIT closing %d sessions", sessCount);
