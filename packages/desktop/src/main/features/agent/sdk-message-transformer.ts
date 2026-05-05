@@ -1,11 +1,4 @@
-import type { SDKMessage, SDKPartialAssistantMessage } from "@anthropic-ai/claude-agent-sdk";
-import type {
-  BetaRawContentBlockDeltaEvent,
-  BetaRawContentBlockStartEvent,
-  BetaRawContentBlockStopEvent,
-  BetaRawMessageStartEvent,
-  BetaToolUseBlock,
-} from "@anthropic-ai/sdk/resources/beta/messages/messages.mjs";
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import { createUIMessageStream, readUIMessageStream } from "ai";
 
@@ -24,26 +17,19 @@ import {
   claudeCodeMetadata,
   emitParsedUserText,
   isTopLevelParent,
-  reasoningPartId,
-  textPartId,
 } from "./transformer/parts-builder";
+import {
+  type ActiveContentBlock,
+  createStreamState,
+  type StreamHandlerContext,
+  type StreamState,
+  transformStreamEvent as runTransformStreamEvent,
+} from "./transformer/stream-handlers";
 import {
   CONTENT_OUTPUT_TOOL_NAMES,
   contentToOutputSchema,
 } from "./transformer/tool-output-fallback";
 import { isSyntheticUserMessage } from "./transformer/type-guards";
-
-type ActiveContentBlock =
-  | { type: "text"; id: string }
-  | { type: "reasoning"; id: string }
-  | {
-      type: "tool-call";
-      toolCallId: string;
-      toolName: string;
-      input: string;
-      providerExecuted: true;
-      providerMetadata?: ReturnType<typeof claudeCodeMetadata>;
-    };
 
 type SDKMessageTransformerOptions = {
   rootParentToolUseId?: string | null;
@@ -51,12 +37,8 @@ type SDKMessageTransformerOptions = {
 };
 
 export class SDKMessageTransformer {
-  private inStep = false;
-  private hasStarted = false;
-  private currentMessageId: string | null = null;
-  private activeStreamedMessageId: string | null = null;
-  private currentParentToolUseId: string | null = null;
-  private currentStreamHasUnsupportedBlocks = false;
+  /** Mutable scalar state shared with `transformer/stream-handlers`. */
+  private readonly streamState: StreamState = createStreamState();
   private readonly completedStreamedAssistantMessageIds = new Set<string>();
   // Narrow dedupe state for Agent kickoff prompts only.
   // We intentionally do not scan prior messages or do fuzzy matching here.
@@ -79,12 +61,12 @@ export class SDKMessageTransformer {
     switch (msg.type) {
       case "system": {
         if (msg.subtype === "init") {
-          this.inStep = false;
-          this.hasStarted = true;
-          this.currentMessageId = null;
-          this.activeStreamedMessageId = null;
-          this.currentParentToolUseId = null;
-          this.currentStreamHasUnsupportedBlocks = false;
+          this.streamState.inStep = false;
+          this.streamState.hasStarted = true;
+          this.streamState.currentMessageId = null;
+          this.streamState.activeStreamedMessageId = null;
+          this.streamState.currentParentToolUseId = null;
+          this.streamState.currentStreamHasUnsupportedBlocks = false;
           this.agentToolPrompts.clear();
           this.activeParentTools.clear();
           yield {
@@ -100,23 +82,23 @@ export class SDKMessageTransformer {
       }
 
       case "assistant": {
-        if (msg.message.id === this.activeStreamedMessageId) {
+        if (msg.message.id === this.streamState.activeStreamedMessageId) {
           break;
         }
         if (this.completedStreamedAssistantMessageIds.has(msg.message.id)) {
           break;
         }
-        if (!this.hasStarted) {
-          this.hasStarted = true;
+        if (!this.streamState.hasStarted) {
+          this.streamState.hasStarted = true;
           yield { type: "start", messageId: msg.message.id };
         }
         if (isTopLevelParent(msg.parent_tool_use_id, this.rootParentToolUseId)) {
-          const isNewStep = msg.message.id !== this.currentMessageId;
+          const isNewStep = msg.message.id !== this.streamState.currentMessageId;
           if (isNewStep) {
-            if (this.inStep) yield { type: "finish-step" };
+            if (this.streamState.inStep) yield { type: "finish-step" };
             yield { type: "start-step" };
-            this.inStep = true;
-            this.currentMessageId = msg.message.id;
+            this.streamState.inStep = true;
+            this.streamState.currentMessageId = msg.message.id;
           }
         }
         yield* this.transformAssistant(msg);
@@ -131,12 +113,12 @@ export class SDKMessageTransformer {
       }
 
       case "stream_event": {
-        yield* this.transformStreamEvent(msg);
+        yield* runTransformStreamEvent(this.streamHandlerContext(), msg);
         break;
       }
 
       case "result": {
-        if (this.inStep) yield { type: "finish-step" };
+        if (this.streamState.inStep) yield { type: "finish-step" };
 
         // aborted_streaming: user sent a new message while the previous turn was still
         // streaming — the SDK aborts the in-flight response. This is expected, not an error.
@@ -154,11 +136,11 @@ export class SDKMessageTransformer {
         yield { type: `data-result/${msg.subtype}`, data: msg } as ClaudeCodeUIMessageChunk;
         yield { type: "finish" };
 
-        this.inStep = false;
-        this.currentMessageId = null;
-        this.activeStreamedMessageId = null;
-        this.currentParentToolUseId = null;
-        this.currentStreamHasUnsupportedBlocks = false;
+        this.streamState.inStep = false;
+        this.streamState.currentMessageId = null;
+        this.streamState.activeStreamedMessageId = null;
+        this.streamState.currentParentToolUseId = null;
+        this.streamState.currentStreamHasUnsupportedBlocks = false;
         this.agentToolPrompts.clear();
         this.contentBlocks.clear();
         this.activeParentTools.clear();
@@ -190,274 +172,23 @@ export class SDKMessageTransformer {
     };
   }
 
-  private *transformStreamEvent(
-    msg: SDKPartialAssistantMessage,
-  ): Generator<ClaudeCodeUIMessageChunk> {
-    switch (msg.event.type) {
-      case "message_start": {
-        yield* this.handleMessageStart(msg, msg.event as BetaRawMessageStartEvent);
-        break;
-      }
-
-      case "content_block_start": {
-        yield* this.handleContentBlockStart(msg.event);
-        break;
-      }
-
-      case "content_block_delta": {
-        yield* this.handleContentBlockDelta(msg.event);
-        break;
-      }
-
-      case "content_block_stop": {
-        yield* this.handleContentBlockStop(msg.event);
-        break;
-      }
-
-      case "message_stop": {
-        yield* this.handleMessageStop();
-        break;
-      }
-
-      case "message_delta": {
-        break;
-      }
-    }
-  }
-
-  // oxlint-disable-next-line require-yield -- caller uses yield*; keeping as generator for symmetry with sibling handlers
-  private *handleMessageStop(): Generator<ClaudeCodeUIMessageChunk> {
-    if (this.currentMessageId != null && !this.currentStreamHasUnsupportedBlocks) {
-      this.completedStreamedAssistantMessageIds.add(this.currentMessageId);
-    }
-    this.activeStreamedMessageId = null;
-  }
-
-  private *handleMessageStart(
-    msg: SDKPartialAssistantMessage,
-    event: BetaRawMessageStartEvent,
-  ): Generator<ClaudeCodeUIMessageChunk> {
-    if (!this.hasStarted) {
-      this.hasStarted = true;
-      yield {
-        type: "start",
-        messageId: event.message.id,
-        messageMetadata: {
-          sessionId: msg.session_id ?? "",
-          parentToolUseId: isTopLevelParent(msg.parent_tool_use_id, this.rootParentToolUseId)
-            ? null
-            : msg.parent_tool_use_id,
-        },
-      };
-    }
-
-    const isNewStep = event.message.id !== this.currentMessageId;
-    if (isNewStep && isTopLevelParent(msg.parent_tool_use_id, this.rootParentToolUseId)) {
-      if (this.inStep) {
-        yield { type: "finish-step" };
-      }
-      yield { type: "start-step" };
-      this.inStep = true;
-      this.currentMessageId = event.message.id;
-      this.contentBlocks.clear();
-    }
-
-    this.currentParentToolUseId = isTopLevelParent(msg.parent_tool_use_id, this.rootParentToolUseId)
-      ? null
-      : msg.parent_tool_use_id;
-    this.currentStreamHasUnsupportedBlocks = false;
-    this.activeStreamedMessageId = event.message.id;
-  }
-
-  private *handleContentBlockStart(
-    event: BetaRawContentBlockStartEvent,
-  ): Generator<ClaudeCodeUIMessageChunk> {
-    if (this.currentMessageId == null || this.contentBlocks.has(event.index)) {
-      return;
-    }
-
-    switch (event.content_block.type) {
-      case "text": {
-        const partId = textPartId(this.currentMessageId, event.index);
-        this.contentBlocks.set(event.index, { type: "text", id: partId });
-        yield { type: "text-start", id: partId };
-        return;
-      }
-
-      case "thinking": {
-        const partId = reasoningPartId(this.currentMessageId, event.index);
-        this.contentBlocks.set(event.index, { type: "reasoning", id: partId });
-        yield { type: "reasoning-start", id: partId };
-        return;
-      }
-
-      case "redacted_thinking": {
-        const partId = reasoningPartId(this.currentMessageId, event.index);
-        this.contentBlocks.set(event.index, { type: "reasoning", id: partId });
-        yield {
-          type: "reasoning-start",
-          id: partId,
-          providerMetadata: { anthropic: { redactedData: event.content_block.data } },
-        };
-        return;
-      }
-
-      case "tool_use": {
-        yield* this.handleToolUseBlockStart(event.content_block, event.index);
-        return;
-      }
-
-      default: {
-        this.currentStreamHasUnsupportedBlocks = true;
-        return;
-      }
-    }
-  }
-
-  private *handleToolUseBlockStart(
-    contentBlock: BetaToolUseBlock,
-    index: number,
-  ): Generator<ClaudeCodeUIMessageChunk> {
-    const initialInput =
-      contentBlock.input != null &&
-      typeof contentBlock.input === "object" &&
-      Object.keys(contentBlock.input).length > 0
-        ? JSON.stringify(contentBlock.input)
-        : "";
-
-    const providerMetadata = claudeCodeMetadata(
-      this.currentParentToolUseId,
-      this.rootParentToolUseId,
-    );
-    this.contentBlocks.set(index, {
-      type: "tool-call",
-      toolCallId: contentBlock.id,
-      toolName: contentBlock.name,
-      input: initialInput,
-      providerExecuted: true,
-      ...(providerMetadata != null ? { providerMetadata } : {}),
-    });
-
-    yield {
-      type: "tool-input-start",
-      toolCallId: contentBlock.id,
-      toolName: contentBlock.name,
-      providerExecuted: true,
-      ...(providerMetadata != null ? { providerMetadata } : {}),
+  /**
+   * Bundle the streaming-state and Set/Map references the stream-handlers
+   * need. Created fresh on every dispatch (cheap object literal); the
+   * `state` object and Set/Map fields are shared by reference so handler
+   * mutations propagate back to the parent.
+   */
+  private streamHandlerContext(): StreamHandlerContext {
+    return {
+      state: this.streamState,
+      contentBlocks: this.contentBlocks,
+      completedStreamedAssistantMessageIds: this.completedStreamedAssistantMessageIds,
+      toolNames: this.toolNames,
+      contentOutputTools: this.contentOutputTools,
+      rootParentToolUseId: this.rootParentToolUseId,
+      rememberAgentToolPrompt: (toolCallId, toolName, input) =>
+        this.rememberAgentToolPrompt(toolCallId, toolName, input),
     };
-  }
-
-  private *handleContentBlockDelta(
-    event: BetaRawContentBlockDeltaEvent,
-  ): Generator<ClaudeCodeUIMessageChunk> {
-    const contentBlock = this.contentBlocks.get(event.index);
-    if (contentBlock == null) {
-      return;
-    }
-
-    switch (event.delta.type) {
-      case "text_delta": {
-        if (contentBlock.type !== "text" || event.delta.text.length === 0) {
-          return;
-        }
-
-        yield { type: "text-delta", id: contentBlock.id, delta: event.delta.text };
-        return;
-      }
-
-      case "thinking_delta": {
-        if (contentBlock.type !== "reasoning") {
-          return;
-        }
-
-        yield { type: "reasoning-delta", id: contentBlock.id, delta: event.delta.thinking };
-        return;
-      }
-
-      case "signature_delta": {
-        if (contentBlock.type !== "reasoning") {
-          return;
-        }
-
-        yield {
-          type: "reasoning-delta",
-          id: contentBlock.id,
-          delta: "",
-          providerMetadata: { anthropic: { signature: event.delta.signature } },
-        };
-        return;
-      }
-
-      case "input_json_delta": {
-        if (contentBlock.type !== "tool-call" || event.delta.partial_json.length === 0) {
-          return;
-        }
-
-        yield {
-          type: "tool-input-delta",
-          toolCallId: contentBlock.toolCallId,
-          inputTextDelta: event.delta.partial_json,
-        };
-        contentBlock.input += event.delta.partial_json;
-        return;
-      }
-    }
-  }
-
-  private *handleContentBlockStop(
-    event: BetaRawContentBlockStopEvent,
-  ): Generator<ClaudeCodeUIMessageChunk> {
-    const contentBlock = this.contentBlocks.get(event.index);
-    if (contentBlock == null) {
-      return;
-    }
-
-    this.contentBlocks.delete(event.index);
-    switch (contentBlock.type) {
-      case "text": {
-        yield { type: "text-end", id: contentBlock.id };
-        return;
-      }
-      case "reasoning": {
-        yield { type: "reasoning-end", id: contentBlock.id };
-        return;
-      }
-      case "tool-call": {
-        const finalInput = contentBlock.input === "" ? "{}" : contentBlock.input;
-
-        try {
-          const parsedInput = JSON.parse(finalInput);
-          this.rememberAgentToolPrompt(contentBlock.toolCallId, contentBlock.toolName, parsedInput);
-          this.toolNames.set(contentBlock.toolCallId, contentBlock.toolName);
-          if (CONTENT_OUTPUT_TOOL_NAMES.has(contentBlock.toolName)) {
-            this.contentOutputTools.add(contentBlock.toolCallId);
-          }
-          yield {
-            type: "tool-input-available",
-            toolCallId: contentBlock.toolCallId,
-            toolName: contentBlock.toolName,
-            input: parsedInput,
-            providerExecuted: contentBlock.providerExecuted,
-            ...(contentBlock.providerMetadata != null
-              ? { providerMetadata: contentBlock.providerMetadata }
-              : {}),
-          };
-        } catch (error) {
-          yield {
-            type: "tool-input-error",
-            toolCallId: contentBlock.toolCallId,
-            toolName: contentBlock.toolName,
-            input: finalInput,
-            errorText: error instanceof Error ? error.message : "Invalid tool input JSON",
-            providerExecuted: contentBlock.providerExecuted,
-            ...(contentBlock.providerMetadata != null
-              ? { providerMetadata: contentBlock.providerMetadata }
-              : {}),
-          };
-        }
-        return;
-      }
-    }
   }
 
   private *transformAssistant(
