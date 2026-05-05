@@ -97,6 +97,32 @@ export function projectSessionInfo(
 }
 
 /**
+ * Enumerate all sessions (optionally filtered by cwd) and project each onto
+ * our wire-shape `SessionInfo`, overlaying disk birthtime onto the SDK's
+ * lastModified-based createdAt.
+ *
+ * Pulled out of `SessionManager.listSessions` so the manager keeps a thin
+ * delegate. The dynamic SDK import is preserved here to keep the module
+ * graph identical (avoiding eager top-level import at startup cost).
+ */
+export async function listAllSessions(
+  cwd: string | undefined,
+  log: (fmt: string, ...args: unknown[]) => void,
+): Promise<SessionInfo[]> {
+  const t0 = performance.now();
+  const { listSessions: sdkListSessions } = await import("@anthropic-ai/claude-agent-sdk");
+  const sessions = await sdkListSessions(cwd ? { dir: cwd } : undefined);
+
+  // Build sessionId -> file birthtime map for accurate createdAt
+  const birthtimeMap = await buildBirthtimeMap();
+
+  const result = projectSessionInfo(sessions, birthtimeMap);
+
+  log("listSessions: DONE in %dms count=%d", Math.round(performance.now() - t0), result.length);
+  return result;
+}
+
+/**
  * Persist a custom title for a session by appending a `custom-title`
  * record to its `.jsonl` file. The SDK reads these on next listSessions
  * and prefers them over derived titles.

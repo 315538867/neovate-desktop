@@ -50,9 +50,8 @@ import { sendUserMessage, type SendContext } from "./session/send";
 import {
   appendCustomTitle,
   archiveSessionFiles,
-  buildBirthtimeMap,
   deleteSessionFiles,
-  projectSessionInfo,
+  listAllSessions,
 } from "./session/store";
 import { consumeSession } from "./session/subscriber";
 
@@ -175,18 +174,7 @@ export class SessionManager {
   }
 
   async listSessions(cwd?: string): Promise<SessionInfo[]> {
-    const t0 = performance.now();
-
-    const { listSessions: sdkListSessions } = await import("@anthropic-ai/claude-agent-sdk");
-    const sessions = await sdkListSessions(cwd ? { dir: cwd } : undefined);
-
-    // Build sessionId -> file birthtime map for accurate createdAt
-    const birthtimeMap = await buildBirthtimeMap();
-
-    const result = projectSessionInfo(sessions, birthtimeMap);
-
-    log("listSessions: DONE in %dms count=%d", Math.round(performance.now() - t0), result.length);
-    return result;
+    return listAllSessions(cwd, log);
   }
 
   async renameSession(sessionId: string, title: string): Promise<void> {
