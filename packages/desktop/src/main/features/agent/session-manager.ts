@@ -1,4 +1,4 @@
-import type { Query, PermissionMode as SDKPermissionMode } from "@anthropic-ai/claude-agent-sdk";
+import type { Query } from "@anthropic-ai/claude-agent-sdk";
 
 import { EventPublisher } from "@orpc/server";
 import debug from "debug";
@@ -26,6 +26,7 @@ import type { RequestTracker } from "./request-tracker";
 import type { SessionEntry } from "./session/types";
 
 import { PowerBlockerService } from "../../core/power-blocker-service";
+import { handleDispatch as handleDispatchFn, type DispatchContext } from "./session/dispatch";
 import {
   initSessionWithTimeout as initSessionWithTimeoutFn,
   type InitContext,
@@ -72,6 +73,7 @@ export class SessionManager {
   // dispatch to the live manager instance.
   private readonly initContext: InitContext;
   private readonly sendContext: SendContext;
+  private readonly dispatchContext: DispatchContext;
 
   constructor(
     private configStore: ConfigStore,
@@ -101,6 +103,11 @@ export class SessionManager {
       requestTracker: this.requestTracker,
       powerBlocker: this.powerBlocker,
       eventPublisher: this.eventPublisher,
+    };
+    this.dispatchContext = {
+      sessions: this.sessions,
+      configStore: this.configStore,
+      log,
     };
   }
 
@@ -508,69 +515,6 @@ export class SessionManager {
     sessionId: string,
     dispatch: ClaudeCodeUIDispatch,
   ): Promise<ClaudeCodeUIDispatchResult> {
-    if (dispatch.kind === "respond") {
-      const session = this.sessions.get(sessionId);
-      if (!session) throw new Error(`Unknown session: ${sessionId}`);
-      const pending = session.pendingRequests.get(dispatch.requestId);
-      if (!pending) {
-        log("handleDispatch: unknown requestId=%s knownIds=%o", dispatch.requestId, [
-          ...session.pendingRequests.keys(),
-        ]);
-        return { kind: "respond", ok: false };
-      }
-      pending.resolve(dispatch.respond.result);
-      session.pendingRequests.delete(dispatch.requestId);
-      return { kind: "respond", ok: true };
-    }
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Unknown session: ${sessionId}`);
-
-    if (dispatch.kind === "interrupt") {
-      log("handleDispatch: interrupt sessionId=%s", sessionId);
-      session.query.interrupt();
-      return { kind: "interrupt", ok: true };
-    }
-
-    if (dispatch.kind === "configure") {
-      const { configure } = dispatch;
-      log("handleDispatch: configure type=%s", configure.type);
-      switch (configure.type) {
-        case "set_permission_mode": {
-          log(
-            "handleDispatch: set_permission_mode sessionId=%s mode=%s",
-            sessionId,
-            configure.mode,
-          );
-          try {
-            await session.query.setPermissionMode(configure.mode as SDKPermissionMode);
-          } catch (error) {
-            log("handleDispatch: set_permission_mode failed: %O", error);
-            return {
-              kind: "configure",
-              ok: false,
-              configure,
-              error: error instanceof Error ? error.message : String(error),
-            };
-          }
-          return { kind: "configure", ok: true, configure };
-        }
-        case "set_model": {
-          let model = configure.model;
-          // Validate model against provider catalog
-          if (session.providerId) {
-            const provider = this.configStore.getProvider(session.providerId);
-            if (provider && !(model in provider.models)) {
-              model = provider.modelMap.model ?? Object.keys(provider.models)[0];
-              log("handleDispatch: set_model fallback model=%s (not in provider catalog)", model);
-            }
-          }
-          log("handleDispatch: set_model sessionId=%s model=%s", sessionId, model);
-          session.query.setModel(model);
-          return { kind: "configure", ok: true, configure: { ...configure, model } };
-        }
-      }
-    }
-
-    return { kind: "configure", ok: false, configure: (dispatch as any).configure };
+    return handleDispatchFn(this.dispatchContext, sessionId, dispatch);
   }
 }
