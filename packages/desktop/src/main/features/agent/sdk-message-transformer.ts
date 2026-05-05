@@ -16,19 +16,22 @@ import type {
 } from "../../../shared/claude-code/types";
 
 import {
+  type AggregatorContext,
+  type ParentToolState,
+  transformWithAggregation as runWithAggregation,
+} from "./transformer/agent-aggregator";
+import {
   claudeCodeMetadata,
   emitParsedUserText,
-  finalizeAgentMessage,
   isTopLevelParent,
   reasoningPartId,
-  resultContentToText,
   textPartId,
 } from "./transformer/parts-builder";
 import {
   CONTENT_OUTPUT_TOOL_NAMES,
   contentToOutputSchema,
 } from "./transformer/tool-output-fallback";
-import { isSyntheticUserMessage, isTaskOrAgentTool } from "./transformer/type-guards";
+import { isSyntheticUserMessage } from "./transformer/type-guards";
 
 type ActiveContentBlock =
   | { type: "text"; id: string }
@@ -45,13 +48,6 @@ type ActiveContentBlock =
 type SDKMessageTransformerOptions = {
   rootParentToolUseId?: string | null;
   rootToolPrompt?: string | null;
-};
-
-type ParentToolState = {
-  toolName: "Task" | "Agent";
-  prompt?: string;
-  childMessages: SDKMessage[];
-  latestMessage?: ClaudeCodeUIMessage;
 };
 
 export class SDKMessageTransformer {
@@ -172,128 +168,26 @@ export class SDKMessageTransformer {
   }
 
   async *transformWithAggregation(msg: SDKMessage): AsyncGenerator<ClaudeCodeUIMessageChunk> {
-    const parentToolUseId = "parent_tool_use_id" in msg ? msg.parent_tool_use_id : null;
-
-    if (parentToolUseId != null && this.activeParentTools.has(parentToolUseId)) {
-      yield* this.handleChildMessage(parentToolUseId, msg);
-      return;
-    }
-
-    const parentToolResults = this.parentToolResultsForMessage(msg);
-    for (const chunk of this.transform(msg)) {
-      if (chunk.type === "tool-input-available" && isTaskOrAgentTool(chunk.toolName)) {
-        this.activeParentTools.set(chunk.toolCallId, {
-          toolName: chunk.toolName,
-          prompt: this.extractToolPrompt(chunk.input),
-          childMessages: [],
-        });
-        yield chunk;
-        continue;
-      }
-
-      if (
-        (chunk.type === "tool-output-available" || chunk.type === "tool-output-error") &&
-        parentToolResults.has(chunk.toolCallId)
-      ) {
-        const state = this.activeParentTools.get(chunk.toolCallId);
-        const toolResult = parentToolResults.get(chunk.toolCallId);
-        if (state == null || toolResult == null) {
-          yield chunk;
-          continue;
-        }
-
-        if (toolResult.is_error) {
-          yield {
-            type: "tool-output-error",
-            toolCallId: chunk.toolCallId,
-            errorText: resultContentToText(toolResult.content, true),
-            providerExecuted: true,
-          };
-        } else {
-          state.latestMessage = finalizeAgentMessage({
-            toolCallId: chunk.toolCallId,
-            sessionId: msg.session_id ?? "",
-            baseMessage: state.latestMessage,
-            result: toolResult.content,
-            isError: false,
-          });
-
-          yield {
-            type: "tool-output-available",
-            toolCallId: chunk.toolCallId,
-            output: state.latestMessage,
-            providerExecuted: true,
-            preliminary: false,
-          };
-        }
-        this.activeParentTools.delete(chunk.toolCallId);
-        continue;
-      }
-
-      yield chunk;
-    }
+    yield* runWithAggregation(this.aggregatorContext(), msg);
   }
 
-  private async *handleChildMessage(
-    parentToolUseId: string,
-    msg: SDKMessage,
-  ): AsyncGenerator<ClaudeCodeUIMessageChunk> {
-    const state = this.activeParentTools.get(parentToolUseId);
-    if (state == null) {
-      return;
-    }
-
-    state.childMessages.push(msg);
-    state.latestMessage = await materializeSDKMessagesToUIMessage(state.childMessages, {
-      transformer: new SDKMessageTransformer({
-        rootParentToolUseId: parentToolUseId,
-        rootToolPrompt: state.prompt ?? null,
-      }),
-    });
-
-    if (state.latestMessage == null) {
-      return;
-    }
-
-    yield {
-      type: "tool-output-available",
-      toolCallId: parentToolUseId,
-      output: state.latestMessage,
-      providerExecuted: true,
-      preliminary: true,
+  /**
+   * Bundle the parent-transformer state the aggregator needs. Created
+   * fresh on every call (cheap object literal); the underlying state map
+   * is shared by reference so accumulation across messages is preserved.
+   */
+  private aggregatorContext(): AggregatorContext {
+    return {
+      activeParentTools: this.activeParentTools,
+      transform: (m) => this.transform(m),
+      materializeChild: (childMessages, parentToolUseId, prompt) =>
+        materializeSDKMessagesToUIMessage(childMessages, {
+          transformer: new SDKMessageTransformer({
+            rootParentToolUseId: parentToolUseId,
+            rootToolPrompt: prompt,
+          }),
+        }),
     };
-  }
-
-  private parentToolResultsForMessage(msg: SDKMessage) {
-    const parentToolResults = new Map<string, { content: unknown; is_error: boolean }>();
-
-    if (msg.type !== "user" || !Array.isArray(msg.message.content)) {
-      return parentToolResults;
-    }
-
-    for (const part of msg.message.content) {
-      if (part.type !== "tool_result") continue;
-      if (!this.activeParentTools.has(part.tool_use_id)) continue;
-      parentToolResults.set(part.tool_use_id, {
-        content: part.content,
-        is_error: part.is_error === true,
-      });
-    }
-
-    return parentToolResults;
-  }
-
-  private extractToolPrompt(input: unknown) {
-    if (
-      input != null &&
-      typeof input === "object" &&
-      "prompt" in input &&
-      typeof input.prompt === "string"
-    ) {
-      return input.prompt;
-    }
-
-    return undefined;
   }
 
   private *transformStreamEvent(
