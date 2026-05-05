@@ -2,7 +2,6 @@ import type { Query } from "@anthropic-ai/claude-agent-sdk";
 
 import { EventPublisher } from "@orpc/server";
 import debug from "debug";
-import { randomUUID } from "node:crypto";
 
 import type {
   ClaudeCodeUIEvent,
@@ -18,7 +17,6 @@ import type {
   SessionInfo,
   SessionLifecycleEvent,
 } from "../../../shared/features/agent/types";
-import type { Provider } from "../../../shared/features/provider/types";
 import type { Contributions } from "../../core/plugin/contributions";
 import type { ConfigStore } from "../config/config-store";
 import type { ProjectStore } from "../project/project-store";
@@ -29,13 +27,11 @@ import { PowerBlockerService } from "../../core/power-blocker-service";
 import { closeSession as closeSessionFn, type CloseContext } from "./session/close";
 import { handleDispatch as handleDispatchFn, type DispatchContext } from "./session/dispatch";
 import {
-  initSessionWithTimeout as initSessionWithTimeoutFn,
-  type InitContext,
-} from "./session/init";
-import {
-  resolveProviderAndModelForCreate,
-  resolveProviderAndModelForLoad,
-} from "./session/resolve";
+  createSession as createSessionFn,
+  type FacadeContext,
+  loadSession as loadSessionFn,
+} from "./session/facade";
+import { type InitContext } from "./session/init";
 import {
   findPrevMessageId,
   lastTurnDiff as lastTurnDiffFn,
@@ -53,7 +49,6 @@ import {
   projectSessionInfo,
 } from "./session/store";
 import { consumeSession } from "./session/subscriber";
-import { sessionMessagesToUIMessages } from "./utils/session-messages-to-ui-messages";
 
 const log = debug("neovate:session-manager");
 const rtkLog = debug("neovate:rtk");
@@ -76,6 +71,7 @@ export class SessionManager {
   private readonly sendContext: SendContext;
   private readonly dispatchContext: DispatchContext;
   private readonly closeContext: CloseContext;
+  private readonly facadeContext: FacadeContext;
 
   constructor(
     private configStore: ConfigStore,
@@ -118,6 +114,12 @@ export class SessionManager {
       requestTracker: this.requestTracker,
       powerBlocker: this.powerBlocker,
       eventPublisher: this.eventPublisher,
+      log,
+    };
+    this.facadeContext = {
+      configStore: this.configStore,
+      projectStore: this.projectStore,
+      initContext: this.initContext,
       log,
     };
   }
@@ -163,44 +165,7 @@ export class SessionManager {
       providerId?: string;
     } & Awaited<ReturnType<Query["initializationResult"]>>
   > {
-    const sessionId = randomUUID();
-    log(
-      "createSession: sessionId=%s cwd=%s model=%s explicitProviderId=%s",
-      sessionId,
-      cwd,
-      model ?? "(auto)",
-      explicitProviderId ?? "(none)",
-    );
-
-    const { provider, modelSetting } = await resolveProviderAndModelForCreate({
-      sessionId,
-      cwd,
-      model,
-      explicitProviderId,
-      configStore: this.configStore,
-      projectStore: this.projectStore,
-      log,
-    });
-
-    log(
-      "createSession: resolved model=%s scope=%s providerId=%s",
-      modelSetting?.model ?? "(default)",
-      modelSetting?.scope ?? "(none)",
-      provider?.id ?? "(none)",
-    );
-
-    const initResult = await this.initSessionWithTimeout(sessionId, cwd, {
-      model: modelSetting?.model,
-      provider,
-    });
-
-    return {
-      ...initResult,
-      sessionId,
-      currentModel: modelSetting?.model,
-      modelScope: modelSetting?.scope,
-      providerId: provider?.id,
-    };
+    return createSessionFn(this.facadeContext, cwd, model, explicitProviderId);
   }
 
   /** Resume an existing session, returning converted historical messages. */
@@ -215,60 +180,7 @@ export class SessionManager {
     modelScope?: ModelScope;
     providerId?: string;
   }> {
-    const { provider, modelSetting } = await resolveProviderAndModelForLoad({
-      sessionId,
-      cwd,
-      configStore: this.configStore,
-      projectStore: this.projectStore,
-      log,
-    });
-
-    // Run SDK session init and on-disk message hydration in parallel:
-    // they are independent (getSessionMessages just reads the .jsonl file
-    // and does not require the resumed query to be live). This typically
-    // shaves the smaller of the two off the perceived load latency.
-    const { getSessionMessages } = await import("@anthropic-ai/claude-agent-sdk");
-    const [capabilities, sessionMessages] = await Promise.all([
-      this.initSessionWithTimeout(sessionId, cwd, {
-        model: modelSetting?.model,
-        resume: sessionId,
-        provider,
-      }),
-      getSessionMessages(sessionId, { includeSystemMessages: true }),
-    ]);
-    const messages = await sessionMessagesToUIMessages(sessionMessages);
-
-    log(
-      "loadSession: sessionId=%s raw=%d messages=%d currentModel=%s modelScope=%s providerId=%s",
-      sessionId,
-      sessionMessages.length,
-      messages.length,
-      modelSetting?.model ?? "(default)",
-      modelSetting?.scope ?? "(none)",
-      provider?.id ?? "(none)",
-    );
-
-    return {
-      sessionId,
-      capabilities,
-      messages,
-      currentModel: modelSetting?.model,
-      modelScope: modelSetting?.scope,
-      providerId: provider?.id,
-    };
-  }
-
-  /** Wrap initSession with a timeout to prevent hanging sessions. */
-  private async initSessionWithTimeout(
-    sessionId: string,
-    cwd: string,
-    opts?: {
-      model?: string;
-      resume?: string;
-      provider?: Provider;
-    },
-  ): Promise<Awaited<ReturnType<Query["initializationResult"]>>> {
-    return initSessionWithTimeoutFn(this.initContext, sessionId, cwd, opts);
+    return loadSessionFn(this.facadeContext, sessionId, cwd);
   }
 
   async listSessions(cwd?: string): Promise<SessionInfo[]> {
