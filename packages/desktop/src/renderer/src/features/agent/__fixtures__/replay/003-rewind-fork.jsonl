@@ -1,0 +1,20 @@
+{"type":"start","messageId":"msg-003"}
+{"type":"start-step"}
+{"type":"text-start","id":"reasoning-1"}
+{"type":"text-delta","id":"reasoning-1","delta":"After rewind, "}
+{"type":"text-delta","id":"reasoning-1","delta":"let me re-examine."}
+{"type":"text-end","id":"reasoning-1"}
+{"type":"tool-input-available","toolCallId":"tool-a","toolName":"read","input":{"file_path":"/src/index.ts"}}
+{"type":"tool-output-available","toolCallId":"tool-a","output":{"content":"export {}"}}
+{"type":"finish-step"}
+{"type":"start-step"}
+{"type":"tool-input-available","toolCallId":"tool-b","toolName":"edit","input":{"file_path":"/src/index.ts","old_string":"export {}","new_string":"export const ok = true;"}}
+{"type":"tool-output-available","toolCallId":"tool-b","output":{"applied":true}}
+{"type":"finish-step"}
+{"type":"start-step"}
+{"type":"text-start","id":"text-final"}
+{"type":"text-delta","id":"text-final","delta":"Done. "}
+{"type":"text-delta","id":"text-final","delta":"Forked branch updated index.ts."}
+{"type":"text-end","id":"text-final"}
+{"type":"finish-step"}
+{"type":"finish"}

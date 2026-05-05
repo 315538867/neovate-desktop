@@ -1,0 +1,8 @@
+{"type":"start","messageId":"msg-001"}
+{"type":"start-step"}
+{"type":"text-start","id":"text-1"}
+{"type":"text-delta","id":"text-1","delta":"Hello, "}
+{"type":"text-delta","id":"text-1","delta":"world!"}
+{"type":"text-end","id":"text-1"}
+{"type":"finish-step"}
+{"type":"finish"}

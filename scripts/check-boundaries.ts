@@ -87,10 +87,14 @@ async function walk(dir: string, out: string[]): Promise<void> {
   const entries = await readdir(dir, { withFileTypes: true });
   for (const e of entries) {
     if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+    // Tests run under vitest in node, not in the rendered window — skip
+    // the boundary check for them so test fixtures can read files,
+    // hash payloads, etc.
+    if (e.name === "__tests__" || e.name === "__fixtures__") continue;
     const p = path.join(dir, e.name);
     if (e.isDirectory()) {
       await walk(p, out);
-    } else if (/\.(ts|tsx|mts|cts)$/.test(e.name)) {
+    } else if (/\.(ts|tsx|mts|cts)$/.test(e.name) && !/\.test\.(ts|tsx)$/.test(e.name)) {
       out.push(p);
     }
   }
