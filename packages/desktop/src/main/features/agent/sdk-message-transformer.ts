@@ -15,8 +15,6 @@ import type {
   ClaudeCodeUIEvent,
 } from "../../../shared/claude-code/types";
 
-import { EditOutputSchema } from "../../../shared/claude-code/tools/edit";
-import { ReadOutputSchema } from "../../../shared/claude-code/tools/read";
 import {
   claudeCodeMetadata,
   emitParsedUserText,
@@ -27,12 +25,10 @@ import {
   textPartId,
 } from "./transformer/parts-builder";
 import {
-  isBase64ImageSource,
-  isImageContentBlock,
-  isSyntheticUserMessage,
-  isTaskOrAgentTool,
-  isTextContentBlock,
-} from "./transformer/type-guards";
+  CONTENT_OUTPUT_TOOL_NAMES,
+  contentToOutputSchema,
+} from "./transformer/tool-output-fallback";
+import { isSyntheticUserMessage, isTaskOrAgentTool } from "./transformer/type-guards";
 
 type ActiveContentBlock =
   | { type: "text"; id: string }
@@ -56,94 +52,6 @@ type ParentToolState = {
   prompt?: string;
   childMessages: SDKMessage[];
   latestMessage?: ClaudeCodeUIMessage;
-};
-
-/** Predefined tools whose output should use raw content instead of tool_use_result. */
-const CONTENT_OUTPUT_TOOL_NAMES = new Set([
-  "Agent",
-  "Task",
-  "Bash",
-  "Write",
-  "MultiEdit",
-  "Glob",
-  "Grep",
-  "WebFetch",
-  "WebSearch",
-  "TodoWrite",
-  "NotebookEdit",
-  "BashOutput",
-  "Skill",
-  "SlashCommand",
-  "EnterPlanMode",
-  "ExitPlanMode",
-  "EnterWorktree",
-  "TaskOutput",
-  "TaskStop",
-]);
-
-/**
- * Content → outputSchema fallback converter entry.
- *
- * On restore, `getSessionMessages` strips `tool_use_result`, so the transformer
- * falls back to the Anthropic API `content` field. Each tool that uses
- * `tool_use_result` (i.e. NOT in CONTENT_OUTPUT_TOOL_NAMES) should register a
- * converter here to transform content into its outputSchema format.
- *
- * The converter output is validated against the schema via `safeParse`.
- * If validation fails, `undefined` is returned (tool renders with no output).
- */
-type ContentFallbackConverter = {
-  schema: { safeParse: (data: unknown) => { success: boolean; data?: unknown } };
-  convert: (content: unknown) => unknown;
-};
-
-const CONTENT_FALLBACK_CONVERTERS: Record<string, ContentFallbackConverter> = {
-  Edit: {
-    schema: EditOutputSchema,
-    convert(content) {
-      // On restore, content is a raw string (the CLI's text output).
-      // We can't reconstruct structuredPatch from it, so return the content
-      // as-is and let safeParse reject it — EditTool gracefully falls back
-      // to input.old_string / input.new_string when output is undefined.
-      return content;
-    },
-  },
-  Read: {
-    schema: ReadOutputSchema,
-    convert(content) {
-      if (typeof content === "string") {
-        const totalLines = content.split("\n").length;
-        return {
-          type: "text",
-          file: { filePath: "", content, numLines: totalLines, startLine: 1, totalLines },
-        };
-      }
-      if (!Array.isArray(content)) return content;
-
-      for (const block of content) {
-        if (isImageContentBlock(block) && isBase64ImageSource(block.source)) {
-          return {
-            type: "image",
-            file: {
-              base64: block.source.data,
-              type: block.source.media_type ?? "image/png",
-              originalSize: 0,
-            },
-          };
-        }
-      }
-
-      const text = content
-        .filter(isTextContentBlock)
-        .map((b) => b.text)
-        .join("\n");
-      const totalLines = text.split("\n").length;
-      return {
-        type: "text",
-        file: { filePath: "", content: text, numLines: totalLines, startLine: 1, totalLines },
-      };
-    },
-  },
 };
 
 export class SDKMessageTransformer {
@@ -808,18 +716,9 @@ export class SDKMessageTransformer {
     // convert content (Anthropic API format) → outputSchema format.
     const toolName = this.toolNames.get(toolCallId);
     if (toolName) {
-      return this.contentToOutputSchema(toolName, content);
+      return contentToOutputSchema(toolName, content);
     }
     return content;
-  }
-
-  private contentToOutputSchema(toolName: string, content: unknown): unknown {
-    const entry = CONTENT_FALLBACK_CONVERTERS[toolName];
-    if (!entry) return undefined;
-
-    const converted = entry.convert(content);
-    const result = entry.schema.safeParse(converted);
-    return result.success ? result.data : undefined;
   }
 }
 
