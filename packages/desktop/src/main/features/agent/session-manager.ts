@@ -26,6 +26,7 @@ import type { RequestTracker } from "./request-tracker";
 import type { SessionEntry } from "./session/types";
 
 import { PowerBlockerService } from "../../core/power-blocker-service";
+import { closeSession as closeSessionFn, type CloseContext } from "./session/close";
 import { handleDispatch as handleDispatchFn, type DispatchContext } from "./session/dispatch";
 import {
   initSessionWithTimeout as initSessionWithTimeoutFn,
@@ -74,6 +75,7 @@ export class SessionManager {
   private readonly initContext: InitContext;
   private readonly sendContext: SendContext;
   private readonly dispatchContext: DispatchContext;
+  private readonly closeContext: CloseContext;
 
   constructor(
     private configStore: ConfigStore,
@@ -107,6 +109,15 @@ export class SessionManager {
     this.dispatchContext = {
       sessions: this.sessions,
       configStore: this.configStore,
+      log,
+    };
+    this.closeContext = {
+      sessions: this.sessions,
+      closingSessions: this.closingSessions,
+      emittedCreatedSessions: this.emittedCreatedSessions,
+      requestTracker: this.requestTracker,
+      powerBlocker: this.powerBlocker,
+      eventPublisher: this.eventPublisher,
       log,
     };
   }
@@ -292,43 +303,7 @@ export class SessionManager {
   }
 
   async closeSession(sessionId: string): Promise<void> {
-    const t0 = performance.now();
-    const el = (step: string) =>
-      log(
-        "closeSession TIMING %s sessionId=%s %dms",
-        step,
-        sessionId,
-        Math.round(performance.now() - t0),
-      );
-
-    if (this.closingSessions.has(sessionId)) {
-      log("closeSession: no-op, already closing sessionId=%s", sessionId);
-      return;
-    }
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      log("closeSession: no-op, unknown sessionId=%s", sessionId);
-      return;
-    }
-    this.closingSessions.add(sessionId);
-    try {
-      session.query.close();
-    } catch (err) {
-      log("closeSession: query.close error sessionId=%s err=%o", sessionId, err);
-    }
-    el("query.close");
-    for (const [requestId, pending] of session.pendingRequests) {
-      pending.resolve({ behavior: "deny", message: "Session closed" });
-      this.eventPublisher.publish(sessionId, { kind: "request_settled", requestId });
-    }
-    el("pendingRequests.settled");
-    this.sessions.delete(sessionId);
-    this.emittedCreatedSessions.delete(sessionId);
-    this.closingSessions.delete(sessionId);
-    this.requestTracker.clearSession(sessionId);
-    this.powerBlocker.onSessionClosed(sessionId);
-    el("cleanup.done");
-    log("closeSession: closed sessionId=%s remainingSessions=%d", sessionId, this.sessions.size);
+    return closeSessionFn(this.closeContext, sessionId);
   }
 
   async closeAll(): Promise<void> {
