@@ -1,15 +1,9 @@
-import type {
-  Query,
-  Options,
-  SDKUserMessage,
-  PermissionMode as SDKPermissionMode,
-} from "@anthropic-ai/claude-agent-sdk";
+import type { Query, PermissionMode as SDKPermissionMode } from "@anthropic-ai/claude-agent-sdk";
 
 import { EventPublisher } from "@orpc/server";
 import debug from "debug";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import path from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -33,24 +27,14 @@ import type { Contributions } from "../../core/plugin/contributions";
 import type { ConfigStore } from "../config/config-store";
 import type { ProjectStore } from "../project/project-store";
 import type { RequestTracker } from "./request-tracker";
+import type { SessionEntry } from "./session/types";
 
 import { extractReadableUserText } from "../../../shared/claude-code/extract-readable-user-text";
-import { mergeAgentContributions } from "../../core/plugin/contributions";
 import { PowerBlockerService } from "../../core/power-blocker-service";
-import { shellEnvService } from "../../core/shell-service";
 import {
-  resolveBunPath,
-  resolveClaudeCodeExecutable,
-  resolveRtkPath,
-  detectRtkHookInSettings,
-} from "./claude-code-utils";
-import { Pushable } from "./pushable";
-import {
-  buildProviderSettings,
-  buildSessionEnv,
-  createRtkHook,
-  createSpawnOverride,
-} from "./session/lifecycle";
+  initSessionWithTimeout as initSessionWithTimeoutFn,
+  type InitContext,
+} from "./session/init";
 import {
   resolveProviderAndModelForCreate,
   resolveProviderAndModelForLoad,
@@ -71,7 +55,6 @@ import {
   projectSessionInfo,
 } from "./session/store";
 import { consumeSession } from "./session/subscriber";
-import { INIT_TIMEOUT_MS, type SessionEntry } from "./session/types";
 import { sessionMessagesToUIMessages } from "./utils/session-messages-to-ui-messages";
 
 const log = debug("neovate:session-manager");
@@ -88,13 +71,33 @@ export class SessionManager {
   private emittedCreatedSessions = new Set<string>();
   private closingSessions = new Set<string>();
 
+  // Bundle of manager-owned state passed to session/init.ts helpers.
+  // Built once in constructor; closures hold `this` so callbacks always
+  // dispatch to the live manager instance.
+  private readonly initContext: InitContext;
+
   constructor(
     private configStore: ConfigStore,
     private projectStore: ProjectStore,
     private requestTracker: RequestTracker,
     private powerBlocker: PowerBlockerService,
     private getAgentContributions: () => Contributions["agents"] = () => [],
-  ) {}
+  ) {
+    this.initContext = {
+      sessions: this.sessions,
+      configStore: this.configStore,
+      requestTracker: this.requestTracker,
+      eventPublisher: this.eventPublisher,
+      powerBlocker: this.powerBlocker,
+      getAgentContributions: () => this.getAgentContributions(),
+      closeSession: (id) => this.closeSession(id),
+      startConsume: (id) => {
+        this.consume(id).catch((err) => log("consume error for %s: %o", id, err));
+      },
+      log,
+      rtkLog,
+    };
+  }
 
   onLifecycle(listener: (event: SessionLifecycleEvent) => void): () => void {
     this.lifecycleListeners.push(listener);
@@ -122,80 +125,6 @@ export class SessionManager {
       model: session.model,
       providerId: session.providerId,
     }));
-  }
-
-  private queryOptions({
-    sessionId,
-    model,
-    cwd,
-  }: {
-    sessionId: string;
-    model?: string;
-    cwd: string;
-  }): Options {
-    const resolved = resolveClaudeCodeExecutable(
-      this.configStore.get("claudeCodeBinPath") || undefined,
-    );
-    return {
-      sessionId,
-      model,
-      cwd,
-      pathToClaudeCodeExecutable: resolved.cliPath ?? resolved.executable,
-      ...(resolved.standalone ? {} : { executable: "bun" as const }),
-      settingSources: ["local", "project", "user"],
-      enableFileCheckpointing: true,
-      includePartialMessages: true,
-      permissionMode: this.configStore.get("permissionMode") ?? "default",
-      promptSuggestions: true,
-      systemPrompt: {
-        type: "preset",
-        preset: "claude_code",
-      },
-      tools: {
-        type: "preset",
-        preset: "claude_code",
-      },
-      canUseTool: async (toolName, input, { signal, ...options }) => {
-        const requestId = randomUUID();
-        const session = this.sessions.get(sessionId);
-        if (!session) throw new Error(`Unknown session: ${sessionId}`);
-
-        const { promise, resolve } =
-          Promise.withResolvers<import("@anthropic-ai/claude-agent-sdk").PermissionResult>();
-        let settled = false;
-        const settle = (
-          result: import("@anthropic-ai/claude-agent-sdk").PermissionResult,
-        ): boolean => {
-          if (settled) return false;
-          settled = true;
-          signal.removeEventListener("abort", onAbort);
-          session.pendingRequests.delete(requestId);
-          // SDK expects updatedInput on allow results to execute the tool
-          resolve(
-            result.behavior === "allow"
-              ? { ...result, updatedInput: result.updatedInput ?? input }
-              : result,
-          );
-          return true;
-        };
-        const onAbort = () => {
-          if (settle({ behavior: "deny", message: "Permission request cancelled" })) {
-            this.eventPublisher.publish(sessionId, { kind: "request_settled", requestId });
-          }
-        };
-        session.pendingRequests.set(requestId, { resolve: settle });
-        this.eventPublisher.publish(sessionId, {
-          kind: "request",
-          requestId,
-          request: { type: "permission_request", toolName, input, options },
-        });
-        signal.addEventListener("abort", onAbort, { once: true });
-        return promise;
-      },
-      stderr(data) {
-        log("stderr sessionId=%s: %s", sessionId, data.trimEnd());
-      },
-    };
   }
 
   /** Start a new session. */
@@ -306,182 +235,6 @@ export class SessionManager {
     };
   }
 
-  /** Shared session initialization: shell env, query, canUseTool wiring. */
-  private async initSession(
-    sessionId: string,
-    cwd: string,
-    opts?: {
-      model?: string;
-      resume?: string;
-      provider?: Provider;
-    },
-  ): Promise<Awaited<ReturnType<Query["initializationResult"]>>> {
-    const input = new Pushable<SDKUserMessage>();
-    const pendingRequests = new Map<
-      string,
-      {
-        resolve: (result: import("@anthropic-ai/claude-agent-sdk").PermissionResult) => void;
-        timer: ReturnType<typeof setTimeout>;
-      }
-    >();
-
-    const t0 = performance.now();
-    const shellEnv = await shellEnvService.getEnv();
-    const tShellEnv = performance.now();
-    log("initSession: TIMING shellEnv=%dms sessionId=%s", Math.round(tShellEnv - t0), sessionId);
-    const bunPath = resolveBunPath();
-    const bunDir = bunPath !== "bun" ? path.dirname(bunPath) : undefined;
-    const rtkPath = resolveRtkPath();
-    const rtkDir = rtkPath !== "rtk" ? path.dirname(rtkPath) : undefined;
-    const env = buildSessionEnv({ shellEnv, bunDir, rtkDir });
-
-    const provider = opts?.provider;
-
-    // Build settings.env for provider credentials (flag settings layer = highest priority)
-    let settingsEnv: Record<string, string> | undefined;
-    if (provider) {
-      const built = buildProviderSettings({
-        provider,
-        model: opts?.model,
-        env,
-        log: (fmt, ...args) => log(`initSession: ${fmt}`, ...args),
-      });
-      settingsEnv = built.settingsEnv;
-
-      log(
-        "initSession: provider=%s baseURL=%s model=%s haiku=%s opus=%s sonnet=%s envOverrides=%o",
-        provider.name,
-        provider.baseURL,
-        settingsEnv.ANTHROPIC_MODEL,
-        settingsEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL,
-        settingsEnv.ANTHROPIC_DEFAULT_OPUS_MODEL,
-        settingsEnv.ANTHROPIC_DEFAULT_SONNET_MODEL,
-        built.appliedOverrides,
-      );
-    }
-
-    const agentLanguage = this.configStore.get("agentLanguage");
-
-    // RTK token optimization hook
-    const tokenOptimization = this.configStore.get("tokenOptimization") !== false;
-    const hasFileBasedRtkHook = detectRtkHookInSettings();
-    const registerRtkHook = tokenOptimization && !hasFileBasedRtkHook;
-
-    if (!tokenOptimization) {
-      rtkLog("hook skipped (disabled)");
-    } else if (hasFileBasedRtkHook) {
-      rtkLog("hook skipped (file-based hook detected in ~/.claude/settings.json)");
-    } else {
-      rtkLog("hook registered rtkPath=%s", rtkPath);
-    }
-
-    const rtkHook = createRtkHook({ rtkPath, env, log: rtkLog });
-
-    // Resolve custom Claude Code binary
-    const resolved = resolveClaudeCodeExecutable(
-      this.configStore.get("claudeCodeBinPath") || undefined,
-    );
-    log(
-      "initSession: executable=%s standalone=%s cliPath=%s sessionId=%s",
-      resolved.executable,
-      resolved.standalone,
-      resolved.cliPath ?? "(none)",
-      sessionId,
-    );
-
-    // Network inspector UI is controlled by networkInspector setting,
-    // but we always inject the interceptor to collect usage stats
-    const networkInspectorUI = this.configStore.get("networkInspector") === true;
-    if (networkInspectorUI) {
-      this.requestTracker.markInspectorEnabled(sessionId);
-    }
-
-    const queryOpts = this.queryOptions({
-      sessionId,
-      cwd,
-      model: opts?.model,
-    });
-    // Merge plugin-contributed hooks and MCP servers
-    const merged = mergeAgentContributions(this.getAgentContributions());
-    log(
-      "initSession: merged contributions sessionId=%s mcpServers=%o hookEvents=%o",
-      sessionId,
-      Object.keys(merged.mcpServers),
-      Object.keys(merged.hooks),
-    );
-    if (registerRtkHook) {
-      (merged.hooks.PreToolUse ??= []).push({ matcher: "Bash", hooks: [rtkHook] });
-    }
-
-    const spawnOverride = createSpawnOverride({
-      resolved,
-      sessionId,
-      settingsEnv,
-      requestTracker: this.requestTracker,
-      log,
-    });
-
-    const options: Options = {
-      ...queryOpts,
-      allowDangerouslySkipPermissions: true,
-      env,
-      settings: {
-        ...(settingsEnv ? { env: settingsEnv } : {}),
-        ...(agentLanguage !== "English" ? { language: agentLanguage.toLowerCase() } : {}),
-      },
-      hooks: merged.hooks,
-      mcpServers: merged.mcpServers,
-      ...(opts?.resume ? { resume: opts.resume, sessionId: undefined } : {}),
-      ...(spawnOverride ? { spawnClaudeCodeProcess: spawnOverride } : {}),
-    };
-
-    const tPreSDK = performance.now();
-    log("initSession: TIMING setup=%dms sessionId=%s", Math.round(tPreSDK - tShellEnv), sessionId);
-    log("initSession: importing SDK sessionId=%s", sessionId);
-    const { query: queryFn } = await import("@anthropic-ai/claude-agent-sdk");
-    const tImport = performance.now();
-    log("initSession: creating SDK query sessionId=%s", sessionId);
-    const q = queryFn({ prompt: input, options });
-    const tQuery = performance.now();
-    this.sessions.set(sessionId, {
-      input,
-      query: q,
-      cwd,
-      providerId: provider?.id,
-      model: opts?.model,
-      createdAt: Date.now(),
-      consumeExited: false,
-      uiToSdkMessageIds: new Map(),
-      pendingRequests,
-    });
-    log(
-      "initSession: TIMING import=%dms query=%dms sessionId=%s",
-      Math.round(tImport - tPreSDK),
-      Math.round(tQuery - tImport),
-      sessionId,
-    );
-    log("initSession: awaiting initializationResult sessionId=%s", sessionId);
-    let initResult: Awaited<ReturnType<Query["initializationResult"]>>;
-    try {
-      initResult = await q.initializationResult();
-    } catch (err) {
-      if (!this.sessions.has(sessionId)) {
-        log("initSession: session closed during init sessionId=%s", sessionId);
-        throw new Error("Session closed during initialization");
-      }
-      throw err;
-    }
-    const tInit = performance.now();
-    log(
-      "initSession: TIMING initResult=%dms total=%dms sessionId=%s",
-      Math.round(tInit - tQuery),
-      Math.round(tInit - t0),
-      sessionId,
-    );
-    this.consume(sessionId).catch((err) => log("consume error for %s: %o", sessionId, err));
-    return initResult;
-  }
-
   /** Wrap initSession with a timeout to prevent hanging sessions. */
   private async initSessionWithTimeout(
     sessionId: string,
@@ -492,28 +245,7 @@ export class SessionManager {
       provider?: Provider;
     },
   ): Promise<Awaited<ReturnType<Query["initializationResult"]>>> {
-    let timer: ReturnType<typeof setTimeout>;
-    const t0 = performance.now();
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        log(
-          "initSessionWithTimeout: TIMEOUT after %dms sessionId=%s",
-          Math.round(performance.now() - t0),
-          sessionId,
-        );
-        reject(new Error("Session initialization timed out"));
-      }, INIT_TIMEOUT_MS);
-    });
-
-    try {
-      const result = await Promise.race([this.initSession(sessionId, cwd, opts), timeoutPromise]);
-      clearTimeout(timer!);
-      return result;
-    } catch (err) {
-      clearTimeout(timer!);
-      await this.closeSession(sessionId);
-      throw err;
-    }
+    return initSessionWithTimeoutFn(this.initContext, sessionId, cwd, opts);
   }
 
   async listSessions(cwd?: string): Promise<SessionInfo[]> {

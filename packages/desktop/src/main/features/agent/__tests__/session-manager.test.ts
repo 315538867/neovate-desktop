@@ -10,6 +10,7 @@ import type { ProjectStore } from "../../project/project-store";
 import { Pushable } from "../pushable";
 import { RequestTracker } from "../request-tracker";
 import { SessionManager } from "../session-manager";
+import { buildQueryOptions } from "../session/init";
 
 const makeStreamEventMsg = (event: any) => ({
   type: "stream_event" as const,
@@ -77,7 +78,7 @@ describe("SessionManager", () => {
   });
 
   it("enables partial assistant messages in query options", () => {
-    const queryOptions = (manager as any).queryOptions({
+    const queryOptions = buildQueryOptions((manager as any).initContext, {
       sessionId: "session-1",
       cwd: "/tmp/project",
     });
