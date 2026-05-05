@@ -78,7 +78,10 @@ describe("SessionManager", () => {
   });
 
   it("enables partial assistant messages in query options", () => {
-    const queryOptions = buildQueryOptions((manager as any).initContext, {
+    // initContext is owned by facadeContext; manager no longer exposes it
+    // directly because it never dispatches against it as a public surface.
+    const initContext = (manager as any).facadeContext.initContext;
+    const queryOptions = buildQueryOptions(initContext, {
       sessionId: "session-1",
       cwd: "/tmp/project",
     });

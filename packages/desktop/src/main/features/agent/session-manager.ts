@@ -25,6 +25,11 @@ import type { SessionEntry } from "./session/types";
 
 import { PowerBlockerService } from "../../core/power-blocker-service";
 import { closeSession as closeSessionFn, type CloseContext } from "./session/close";
+import {
+  buildSessionContexts,
+  type SessionContexts,
+  type SessionContextsDeps,
+} from "./session/ctx-builder";
 import { handleDispatch as handleDispatchFn, type DispatchContext } from "./session/dispatch";
 import {
   createSession as createSessionFn,
@@ -36,7 +41,6 @@ import {
   forkSession as forkSessionFn,
   rewindToMessage as rewindToMessageFn,
 } from "./session/fork";
-import { type InitContext } from "./session/init";
 import {
   lastTurnDiff as lastTurnDiffFn,
   lastTurnFiles as lastTurnFilesFn,
@@ -68,8 +72,9 @@ export class SessionManager {
 
   // Bundles of manager-owned state passed to session helpers.
   // Built once in constructor; closures hold `this` so callbacks always
-  // dispatch to the live manager instance.
-  private readonly initContext: InitContext;
+  // dispatch to the live manager instance. `initContext` is intentionally
+  // not stored — `facadeContext` already references it, and the manager
+  // never dispatches against it directly.
   private readonly sendContext: SendContext;
   private readonly dispatchContext: DispatchContext;
   private readonly closeContext: CloseContext;
@@ -83,55 +88,31 @@ export class SessionManager {
     private powerBlocker: PowerBlockerService,
     private getAgentContributions: () => Contributions["agents"] = () => [],
   ) {
-    this.initContext = {
+    const deps: SessionContextsDeps = {
       sessions: this.sessions,
+      emittedCreatedSessions: this.emittedCreatedSessions,
+      closingSessions: this.closingSessions,
       configStore: this.configStore,
+      projectStore: this.projectStore,
       requestTracker: this.requestTracker,
-      eventPublisher: this.eventPublisher,
       powerBlocker: this.powerBlocker,
+      eventPublisher: this.eventPublisher,
       getAgentContributions: () => this.getAgentContributions(),
       closeSession: (id) => this.closeSession(id),
+      createSession: (cwd) => this.createSession(cwd),
+      emitLifecycle: (event) => this.emitLifecycle(event),
       startConsume: (id) => {
         this.consume(id).catch((err) => log("consume error for %s: %o", id, err));
       },
       log,
       rtkLog,
     };
-    this.sendContext = {
-      sessions: this.sessions,
-      emittedCreatedSessions: this.emittedCreatedSessions,
-      emitLifecycle: (event) => this.emitLifecycle(event),
-      requestTracker: this.requestTracker,
-      powerBlocker: this.powerBlocker,
-      eventPublisher: this.eventPublisher,
-    };
-    this.dispatchContext = {
-      sessions: this.sessions,
-      configStore: this.configStore,
-      log,
-    };
-    this.closeContext = {
-      sessions: this.sessions,
-      closingSessions: this.closingSessions,
-      emittedCreatedSessions: this.emittedCreatedSessions,
-      requestTracker: this.requestTracker,
-      powerBlocker: this.powerBlocker,
-      eventPublisher: this.eventPublisher,
-      log,
-    };
-    this.facadeContext = {
-      configStore: this.configStore,
-      projectStore: this.projectStore,
-      initContext: this.initContext,
-      log,
-    };
-    this.forkContext = {
-      sessions: this.sessions,
-      closeSession: (id) => this.closeSession(id),
-      createSession: (cwd) => this.createSession(cwd),
-      emitLifecycle: (event) => this.emitLifecycle(event),
-      log,
-    };
+    const contexts: SessionContexts = buildSessionContexts(deps);
+    this.sendContext = contexts.sendContext;
+    this.dispatchContext = contexts.dispatchContext;
+    this.closeContext = contexts.closeContext;
+    this.facadeContext = contexts.facadeContext;
+    this.forkContext = contexts.forkContext;
   }
 
   onLifecycle(listener: (event: SessionLifecycleEvent) => void): () => void {
