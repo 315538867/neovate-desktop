@@ -2,11 +2,7 @@ import type { Query, PermissionMode as SDKPermissionMode } from "@anthropic-ai/c
 
 import { EventPublisher } from "@orpc/server";
 import debug from "debug";
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
 
 import type {
   ClaudeCodeUIEvent,
@@ -29,7 +25,6 @@ import type { ProjectStore } from "../project/project-store";
 import type { RequestTracker } from "./request-tracker";
 import type { SessionEntry } from "./session/types";
 
-import { extractReadableUserText } from "../../../shared/claude-code/extract-readable-user-text";
 import { PowerBlockerService } from "../../core/power-blocker-service";
 import {
   initSessionWithTimeout as initSessionWithTimeoutFn,
@@ -47,6 +42,7 @@ import {
   resolveSdkMessageId,
   rewindFilesDryRun as rewindFilesDryRunFn,
 } from "./session/rewind-fork";
+import { sendUserMessage, type SendContext } from "./session/send";
 import {
   appendCustomTitle,
   archiveSessionFiles,
@@ -71,10 +67,11 @@ export class SessionManager {
   private emittedCreatedSessions = new Set<string>();
   private closingSessions = new Set<string>();
 
-  // Bundle of manager-owned state passed to session/init.ts helpers.
+  // Bundles of manager-owned state passed to session helpers.
   // Built once in constructor; closures hold `this` so callbacks always
   // dispatch to the live manager instance.
   private readonly initContext: InitContext;
+  private readonly sendContext: SendContext;
 
   constructor(
     private configStore: ConfigStore,
@@ -96,6 +93,14 @@ export class SessionManager {
       },
       log,
       rtkLog,
+    };
+    this.sendContext = {
+      sessions: this.sessions,
+      emittedCreatedSessions: this.emittedCreatedSessions,
+      emitLifecycle: (event) => this.emitLifecycle(event),
+      requestTracker: this.requestTracker,
+      powerBlocker: this.powerBlocker,
+      eventPublisher: this.eventPublisher,
     };
   }
 
@@ -477,116 +482,8 @@ export class SessionManager {
    * Send a user message into the session's input Pushable.
    * Does NOT consume the query iterator — that is handled by consume().
    */
-  async send(
-    sessionId: string,
-    message: import("../../../shared/claude-code/types").ClaudeCodeUIMessage,
-  ): Promise<void> {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Unknown session: ${sessionId}`);
-    if (session.consumeExited) throw new Error(`Session consume loop has exited: ${sessionId}`);
-
-    // UIMessage -> SDKUserMessage: collapse text + slash-command parts back to
-    // their plain-text form (e.g. `data-slash-command{name:"zcf:workflow"}` →
-    // `/zcf:workflow`). Filtering by `type:"text"` here would silently drop the
-    // command name, causing the SDK to receive only the trailing args and never
-    // recognise the slash command on either expansion or persistence.
-    const text = extractReadableUserText(message.parts);
-
-    // Emit lifecycle "created" on first message (not on createSession, so empty sessions don't appear)
-    if (!this.emittedCreatedSessions.has(sessionId)) {
-      this.emittedCreatedSessions.add(sessionId);
-      const now = new Date().toISOString();
-      this.emitLifecycle({
-        type: "created",
-        session: {
-          sessionId,
-          cwd: session.cwd,
-          createdAt: now,
-          updatedAt: now,
-          title: text.slice(0, 50),
-        },
-      });
-    }
-
-    const imageBlocks = message.parts
-      .filter(
-        (p): p is { type: "file"; mediaType: string; url: string } =>
-          p.type === "file" &&
-          typeof (p as any).mediaType === "string" &&
-          (p as any).mediaType.startsWith("image/"),
-      )
-      .map((p) => {
-        const base64 = p.url.startsWith("data:") ? p.url.split(",")[1] : p.url;
-        return {
-          type: "image" as const,
-          source: {
-            type: "base64" as const,
-            media_type: p.mediaType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
-            data: base64,
-          },
-        };
-      });
-
-    const pdfBlocks = message.parts
-      .filter(
-        (p): p is { type: "file"; mediaType: string; url: string } =>
-          p.type === "file" &&
-          typeof (p as any).mediaType === "string" &&
-          (p as any).mediaType === "application/pdf",
-      )
-      .map((p) => {
-        const base64 = p.url.startsWith("data:") ? p.url.split(",")[1] : p.url;
-        return {
-          type: "document" as const,
-          source: {
-            type: "base64" as const,
-            media_type: "application/pdf" as const,
-            data: base64,
-          },
-        };
-      });
-
-    const mediaBlocks = [...imageBlocks, ...pdfBlocks];
-    const content =
-      mediaBlocks.length > 0
-        ? [...(text ? [{ type: "text" as const, text }] : []), ...mediaBlocks]
-        : text;
-
-    // Pre-turn snapshot: capture working tree state before Claude modifies files
-    let preTurnRef: string | undefined;
-    try {
-      const { stdout } = await execFileAsync("git", ["stash", "create"], { cwd: session.cwd });
-      preTurnRef = stdout.trim() || undefined;
-    } catch {
-      // not a git repo or git not available — skip
-    }
-    // Fall back to HEAD if working tree was clean (git stash create returns empty)
-    if (!preTurnRef) {
-      try {
-        const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: session.cwd });
-        preTurnRef = stdout.trim() || undefined;
-      } catch {
-        // ignore
-      }
-    }
-    session.preTurnRef = preTurnRef;
-
-    const userMessageId = randomUUID();
-    session.lastUserMessageId = userMessageId;
-    // Track UI message ID → SDK UUID mapping for rewind
-    if (message.id) {
-      session.uiToSdkMessageIds.set(message.id, userMessageId);
-    }
-
-    this.requestTracker.startTurn(sessionId);
-    this.powerBlocker.onTurnStart(sessionId);
-    session.input.push({
-      type: "user",
-      message: { role: "user", content },
-      parent_tool_use_id: null,
-      session_id: sessionId,
-      uuid: userMessageId,
-    });
+  async send(sessionId: string, message: ClaudeCodeUIMessage): Promise<void> {
+    return sendUserMessage(this.sendContext, sessionId, message);
   }
 
   /**
