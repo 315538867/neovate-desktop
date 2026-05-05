@@ -17,7 +17,6 @@ const execFileAsync = promisify(execFile);
 import type {
   ClaudeCodeUIEvent,
   ClaudeCodeUIMessage,
-  ClaudeCodeUIMessageChunk,
   ClaudeCodeUIDispatch,
   ClaudeCodeUIDispatchResult,
 } from "../../../shared/claude-code/types";
@@ -36,7 +35,6 @@ import type { ProjectStore } from "../project/project-store";
 import type { RequestTracker } from "./request-tracker";
 
 import { extractReadableUserText } from "../../../shared/claude-code/extract-readable-user-text";
-import { lookupContextWindow } from "../../../shared/claude-code/model-context-windows";
 import { mergeAgentContributions } from "../../core/plugin/contributions";
 import { PowerBlockerService } from "../../core/power-blocker-service";
 import { shellEnvService } from "../../core/shell-service";
@@ -48,7 +46,6 @@ import {
 } from "./claude-code-utils";
 import { readModelSetting, readProviderSetting, readProviderModelSetting } from "./claude-settings";
 import { Pushable } from "./pushable";
-import { SDKMessageTransformer, toUIEvent } from "./sdk-message-transformer";
 import {
   buildProviderSettings,
   buildSessionEnv,
@@ -70,6 +67,7 @@ import {
   deleteSessionFiles,
   projectSessionInfo,
 } from "./session/store";
+import { consumeSession } from "./session/subscriber";
 import { INIT_TIMEOUT_MS, type SessionEntry } from "./session/types";
 import { sessionMessagesToUIMessages } from "./utils/session-messages-to-ui-messages";
 
@@ -922,102 +920,12 @@ export class SessionManager {
   private async consume(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
-    const transformer = new SDKMessageTransformer();
-
-    // Track the latest top-level message_start usage to compute context window fill
-    let lastInputTokens = 0;
-
-    try {
-      while (true) {
-        const { value, done } = await session.query.next();
-        if (done || !value) break;
-
-        // Track context window usage from top-level message_start events
-        if (
-          value.type === "stream_event" &&
-          value.event.type === "message_start" &&
-          value.parent_tool_use_id === null
-        ) {
-          // Non-Anthropic providers (e.g. Wohu/Kimi) may omit usage from message_start
-          const usage = value.event.message.usage;
-          if (usage) {
-            lastInputTokens =
-              (usage.input_tokens ?? 0) +
-              (usage.cache_creation_input_tokens ?? 0) +
-              (usage.cache_read_input_tokens ?? 0);
-          }
-        }
-
-        // Publish side events to subscribe stream (result event included — carries cost/usage/stop_reason)
-        const event = toUIEvent(value);
-        if (event) {
-          this.eventPublisher.publish(sessionId, event);
-        }
-
-        // On result, publish context_usage event with computed remaining %
-        if (value.type === "result") {
-          const modelEntries = Object.values(value.modelUsage ?? {});
-          const modelUsage = modelEntries[0];
-
-          if (session.providerId) {
-            // Third-party provider: contextWindow is unreliable (SDK defaults to 200k).
-            // Publish cumulative input/output tokens from the API response instead.
-            this.eventPublisher.publish(sessionId, {
-              kind: "event",
-              event: {
-                id: randomUUID(),
-                type: "context_usage",
-                contextWindowSize: 0,
-                usedTokens: 0,
-                remainingPct: 0,
-                totalInputTokens: modelUsage?.inputTokens ?? 0,
-                totalOutputTokens: modelUsage?.outputTokens ?? 0,
-              },
-            });
-          } else {
-            let contextWindowSize = modelUsage?.contextWindow ?? 0;
-            if (!contextWindowSize) {
-              // Non-Anthropic providers often omit contextWindow; fall back to a known map.
-              contextWindowSize = lookupContextWindow(session.model);
-            }
-            const remainingPct =
-              contextWindowSize > 0
-                ? Math.max(
-                    0,
-                    Math.min(100, Math.round((1 - lastInputTokens / contextWindowSize) * 100)),
-                  )
-                : 0;
-            this.eventPublisher.publish(sessionId, {
-              kind: "event",
-              event: {
-                id: randomUUID(),
-                type: "context_usage",
-                contextWindowSize,
-                usedTokens: lastInputTokens,
-                remainingPct,
-              },
-            });
-          }
-          this.powerBlocker.onTurnEnd(sessionId);
-        }
-
-        // Publish chunks through eventPublisher (wrapped as { kind: "chunk", chunk })
-        for await (const chunk of transformer.transformWithAggregation(value)) {
-          this.eventPublisher.publish(sessionId, { kind: "chunk", chunk });
-        }
-
-        // NO break on result — continue processing background turns
-      }
-    } catch (err: unknown) {
-      const errorText = err instanceof Error ? err.message : String(err);
-      this.eventPublisher.publish(sessionId, {
-        kind: "chunk",
-        chunk: { type: "error", errorText } as ClaudeCodeUIMessageChunk,
-      });
-    } finally {
-      session.consumeExited = true;
-      this.powerBlocker.onTurnEnd(sessionId);
-    }
+    await consumeSession({
+      sessionId,
+      session,
+      eventPublisher: this.eventPublisher,
+      powerBlocker: this.powerBlocker,
+    });
   }
 
   /** Handle dispatch — respond to permission request or configure session */
