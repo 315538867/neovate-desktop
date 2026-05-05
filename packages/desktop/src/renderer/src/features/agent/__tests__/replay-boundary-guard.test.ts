@@ -34,7 +34,14 @@ import {
 
 const FIXTURE_DIR = path.join(import.meta.dirname, "..", "__fixtures__", "replay");
 
-const FIXTURES = ["001-simple-text", "002-multi-tool", "003-rewind-fork"] as const;
+const FIXTURES = [
+  "001-simple-text",
+  "002-multi-tool",
+  "003-rewind-fork",
+  "004-slash-command",
+  "005-interrupt",
+  "006-compact-boundary",
+] as const;
 
 function loadFixture(name: string): UIMessageChunk[] {
   const raw = readFileSync(path.join(FIXTURE_DIR, `${name}.jsonl`), "utf8");

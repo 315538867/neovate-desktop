@@ -1,0 +1,6 @@
+{"type":"start","messageId":"msg-004"}
+{"type":"data-slash-command","id":"msg-004-cmd-0","data":{"name":"model","message":"model","args":"claude-sonnet-4-6","stdout":"Set model to claude-sonnet-4-6"}}
+{"type":"text-start","id":"msg-004-text-1"}
+{"type":"text-delta","id":"msg-004-text-1","delta":"continue with new model"}
+{"type":"text-end","id":"msg-004-text-1"}
+{"type":"finish"}
