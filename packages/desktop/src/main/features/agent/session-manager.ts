@@ -44,7 +44,6 @@ import {
   resolveRtkPath,
   detectRtkHookInSettings,
 } from "./claude-code-utils";
-import { readModelSetting, readProviderSetting, readProviderModelSetting } from "./claude-settings";
 import { Pushable } from "./pushable";
 import {
   buildProviderSettings,
@@ -52,6 +51,10 @@ import {
   createRtkHook,
   createSpawnOverride,
 } from "./session/lifecycle";
+import {
+  resolveProviderAndModelForCreate,
+  resolveProviderAndModelForLoad,
+} from "./session/resolve";
 import {
   findPrevMessageId,
   lastTurnDiff as lastTurnDiffFn,
@@ -217,56 +220,15 @@ export class SessionManager {
       explicitProviderId ?? "(none)",
     );
 
-    // Resolve provider: explicit param overrides settings chain
-    // null = force no provider (SDK Default), undefined = use settings chain
-    let provider: Provider | undefined;
-    if (explicitProviderId === null) {
-      log("createSession: explicit null providerId — forcing SDK Default");
-    } else if (explicitProviderId) {
-      const p = this.configStore.getProvider(explicitProviderId);
-      if (p?.enabled) {
-        provider = p;
-        log("createSession: using explicit provider=%s", p.name);
-      } else {
-        log(
-          "createSession: explicit provider id=%s not found or disabled, falling through",
-          explicitProviderId,
-        );
-      }
-    }
-    if (explicitProviderId === undefined && !provider) {
-      const providerSetting = await readProviderSetting(
-        sessionId,
-        cwd,
-        this.configStore,
-        this.projectStore,
-      );
-      provider = providerSetting?.provider;
-    }
-
-    if (provider && !explicitProviderId) {
-      log("createSession: resolved provider=%s from settings", provider.name);
-    }
-
-    // Resolve model: explicit param > settings chain (provider-aware or SDK-default)
-    // When explicitProviderId === null (force SDK Default), skip model settings
-    // to avoid picking up a provider-specific model from the settings chain.
-    let modelSetting: { model: string; scope: ModelScope } | undefined;
-    if (model) {
-      modelSetting = { model, scope: "session" };
-    } else if (explicitProviderId === null) {
-      // Let SDK use its own defaults
-    } else if (provider) {
-      modelSetting = await readProviderModelSetting(
-        sessionId,
-        cwd,
-        provider,
-        this.configStore,
-        this.projectStore,
-      );
-    } else {
-      modelSetting = await readModelSetting(sessionId, cwd);
-    }
+    const { provider, modelSetting } = await resolveProviderAndModelForCreate({
+      sessionId,
+      cwd,
+      model,
+      explicitProviderId,
+      configStore: this.configStore,
+      projectStore: this.projectStore,
+      log,
+    });
 
     log(
       "createSession: resolved model=%s scope=%s providerId=%s",
@@ -301,29 +263,13 @@ export class SessionManager {
     modelScope?: ModelScope;
     providerId?: string;
   }> {
-    // Resolve provider
-    const providerSetting = await readProviderSetting(
+    const { provider, modelSetting } = await resolveProviderAndModelForLoad({
       sessionId,
       cwd,
-      this.configStore,
-      this.projectStore,
-    );
-    const provider = providerSetting?.provider;
-
-    if (provider) {
-      log("loadSession: resolved provider=%s scope=%s", provider.name, providerSetting!.scope);
-    }
-
-    // Read persisted model setting before initializing SDK query
-    const modelSetting = provider
-      ? await readProviderModelSetting(
-          sessionId,
-          cwd,
-          provider,
-          this.configStore,
-          this.projectStore,
-        )
-      : await readModelSetting(sessionId, cwd);
+      configStore: this.configStore,
+      projectStore: this.projectStore,
+      log,
+    });
 
     // Run SDK session init and on-disk message hydration in parallel:
     // they are independent (getSessionMessages just reads the .jsonl file
