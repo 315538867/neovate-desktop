@@ -18,6 +18,15 @@ import type {
 import { parseCliUserContent } from "../../../shared/claude-code/parse-cli-user-content";
 import { EditOutputSchema } from "../../../shared/claude-code/tools/edit";
 import { ReadOutputSchema } from "../../../shared/claude-code/tools/read";
+import {
+  isBase64ImageSource,
+  isImageContentBlock,
+  isStringResultObject,
+  isSyntheticUserMessage,
+  isTaskOrAgentTool,
+  isTextContentBlock,
+  isUrlImageSource,
+} from "./transformer/type-guards";
 
 type ActiveContentBlock =
   | { type: "text"; id: string }
@@ -42,10 +51,6 @@ type ParentToolState = {
   childMessages: SDKMessage[];
   latestMessage?: ClaudeCodeUIMessage;
 };
-
-function isTaskOrAgentTool(toolName: string): toolName is "Task" | "Agent" {
-  return toolName === "Task" || toolName === "Agent";
-}
 
 /** Predefined tools whose output should use raw content instead of tool_use_result. */
 const CONTENT_OUTPUT_TOOL_NAMES = new Set([
@@ -110,11 +115,11 @@ const CONTENT_FALLBACK_CONVERTERS: Record<string, ContentFallbackConverter> = {
       if (!Array.isArray(content)) return content;
 
       for (const block of content) {
-        if (block?.type === "image" && block.source?.type === "base64") {
+        if (isImageContentBlock(block) && isBase64ImageSource(block.source)) {
           return {
             type: "image",
             file: {
-              base64: block.source.data ?? "",
+              base64: block.source.data,
               type: block.source.media_type ?? "image/png",
               originalSize: 0,
             },
@@ -123,8 +128,8 @@ const CONTENT_FALLBACK_CONVERTERS: Record<string, ContentFallbackConverter> = {
       }
 
       const text = content
-        .filter((b: any) => b?.type === "text" && typeof b.text === "string")
-        .map((b: any) => b.text)
+        .filter(isTextContentBlock)
+        .map((b) => b.text)
         .join("\n");
       const totalLines = text.split("\n").length;
       return {
@@ -210,7 +215,7 @@ export class SDKMessageTransformer {
 
       case "user": {
         // Skip synthetic messages injected by the SDK (e.g. skill prompt expansions)
-        if ("isSynthetic" in msg && msg.isSynthetic) break;
+        if (isSyntheticUserMessage(msg)) break;
         yield* this.transformUser(msg);
         break;
       }
@@ -901,22 +906,17 @@ export class SDKMessageTransformer {
     const texts: string[] = [];
     const images: { url: string; mediaType: string; filename?: string }[] = [];
     for (const block of content) {
-      if (block?.type === "text" && typeof block.text === "string") {
+      if (isTextContentBlock(block)) {
         texts.push(block.text);
-      } else if (block?.type === "image" && block.source) {
-        const src = block.source as {
-          type: string;
-          media_type?: string;
-          data?: string;
-          url?: string;
-        };
-        if (src.type === "base64" && src.data) {
+      } else if (isImageContentBlock(block)) {
+        const src = block.source;
+        if (isBase64ImageSource(src)) {
           images.push({
             url: `data:${src.media_type || "image/png"};base64,${src.data}`,
             mediaType: src.media_type || "image/png",
             filename: block.filename,
           });
-        } else if (src.type === "url" && src.url) {
+        } else if (isUrlImageSource(src)) {
           images.push({
             url: src.url,
             mediaType: src.media_type || "image/png",
@@ -949,23 +949,11 @@ export class SDKMessageTransformer {
       texts.push(result);
     } else if (Array.isArray(result)) {
       for (const part of result) {
-        if (
-          part != null &&
-          typeof part === "object" &&
-          "type" in part &&
-          part.type === "text" &&
-          "text" in part &&
-          typeof part.text === "string"
-        ) {
+        if (isTextContentBlock(part)) {
           texts.push(part.text);
         }
       }
-    } else if (
-      result != null &&
-      typeof result === "object" &&
-      "result" in result &&
-      typeof result.result === "string"
-    ) {
+    } else if (isStringResultObject(result)) {
       texts.push(result.result);
     } else if (result != null) {
       texts.push(JSON.stringify(result));
