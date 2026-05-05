@@ -4,18 +4,18 @@ import type {
   SDKUserMessage,
   SDKSessionInfo,
   PermissionMode as SDKPermissionMode,
-  SpawnedProcess,
 } from "@anthropic-ai/claude-agent-sdk";
 
 import { EventPublisher } from "@orpc/server";
 import debug from "debug";
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFile, copyFile, mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { createInterface } from "node:readline";
 import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 import type {
   ClaudeCodeUIEvent,
@@ -32,12 +32,8 @@ import type {
   SessionInfo,
   SessionLifecycleEvent,
 } from "../../../shared/features/agent/types";
-import type { Contributions } from "../../core/plugin/contributions";
-
-import { mergeAgentContributions } from "../../core/plugin/contributions";
-
-const execFileAsync = promisify(execFile);
 import type { Provider } from "../../../shared/features/provider/types";
+import type { Contributions } from "../../core/plugin/contributions";
 import type { ConfigStore } from "../config/config-store";
 import type { ProjectStore } from "../project/project-store";
 import type { RequestTracker } from "./request-tracker";
@@ -45,19 +41,25 @@ import type { RequestTracker } from "./request-tracker";
 import { extractReadableUserText } from "../../../shared/claude-code/extract-readable-user-text";
 import { lookupContextWindow } from "../../../shared/claude-code/model-context-windows";
 import { APP_DATA_DIR } from "../../core/app-paths";
+import { mergeAgentContributions } from "../../core/plugin/contributions";
 import { PowerBlockerService } from "../../core/power-blocker-service";
 import { shellEnvService } from "../../core/shell-service";
 import {
   resolveBunPath,
   resolveClaudeCodeExecutable,
-  resolveInterceptorPath,
   resolveRtkPath,
   detectRtkHookInSettings,
 } from "./claude-code-utils";
 import { readModelSetting, readProviderSetting, readProviderModelSetting } from "./claude-settings";
 import { Pushable } from "./pushable";
 import { SDKMessageTransformer, toUIEvent } from "./sdk-message-transformer";
-import { ENV_BLOCKLIST, INIT_TIMEOUT_MS, type SessionEntry } from "./session/types";
+import {
+  buildProviderSettings,
+  buildSessionEnv,
+  createRtkHook,
+  createSpawnOverride,
+} from "./session/lifecycle";
+import { INIT_TIMEOUT_MS, type SessionEntry } from "./session/types";
 import { sessionMessagesToUIMessages } from "./utils/session-messages-to-ui-messages";
 
 const log = debug("neovate:session-manager");
@@ -405,45 +407,20 @@ export class SessionManager {
     const bunDir = bunPath !== "bun" ? path.dirname(bunPath) : undefined;
     const rtkPath = resolveRtkPath();
     const rtkDir = rtkPath !== "rtk" ? path.dirname(rtkPath) : undefined;
-    const mergedPath = [rtkDir, bunDir, shellEnv.PATH].filter(Boolean).join(path.delimiter);
-    const env: Record<string, string | undefined> = {
-      ...shellEnv,
-      PATH: mergedPath,
-      CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: "1",
-    };
+    const env = buildSessionEnv({ shellEnv, bunDir, rtkDir });
 
     const provider = opts?.provider;
 
     // Build settings.env for provider credentials (flag settings layer = highest priority)
     let settingsEnv: Record<string, string> | undefined;
     if (provider) {
-      // Remove ANTHROPIC_API_KEY from process env to avoid conflicts
-      delete env.ANTHROPIC_API_KEY;
-
-      const fallback = provider.modelMap.model ?? Object.keys(provider.models)[0];
-      settingsEnv = {
-        ANTHROPIC_AUTH_TOKEN: provider.apiKey,
-        ANTHROPIC_BASE_URL: provider.baseURL,
-        ANTHROPIC_MODEL: opts?.model ?? fallback,
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: provider.modelMap.haiku ?? fallback,
-        ANTHROPIC_DEFAULT_OPUS_MODEL: provider.modelMap.opus ?? fallback,
-        ANTHROPIC_DEFAULT_SONNET_MODEL: provider.modelMap.sonnet ?? fallback,
-      };
-
-      const appliedOverrides: string[] = [];
-      for (const [key, value] of Object.entries(provider.envOverrides)) {
-        if (ENV_BLOCKLIST.has(key)) {
-          log("initSession: skipped blocked envOverride key=%s", key);
-          continue;
-        }
-        if (value === "") {
-          delete env[key];
-          appliedOverrides.push(`-${key}`);
-        } else {
-          settingsEnv[key] = value;
-          appliedOverrides.push(key);
-        }
-      }
+      const built = buildProviderSettings({
+        provider,
+        model: opts?.model,
+        env,
+        log: (fmt, ...args) => log(`initSession: ${fmt}`, ...args),
+      });
+      settingsEnv = built.settingsEnv;
 
       log(
         "initSession: provider=%s baseURL=%s model=%s haiku=%s opus=%s sonnet=%s envOverrides=%o",
@@ -453,7 +430,7 @@ export class SessionManager {
         settingsEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL,
         settingsEnv.ANTHROPIC_DEFAULT_OPUS_MODEL,
         settingsEnv.ANTHROPIC_DEFAULT_SONNET_MODEL,
-        appliedOverrides,
+        built.appliedOverrides,
       );
     }
 
@@ -472,47 +449,7 @@ export class SessionManager {
       rtkLog("hook registered rtkPath=%s", rtkPath);
     }
 
-    type HookCallback = import("@anthropic-ai/claude-agent-sdk").HookCallback;
-    const rtkHook: HookCallback = async (input) => {
-      if (input.hook_event_name !== "PreToolUse") return { continue: true };
-      const cmd = (input.tool_input as Record<string, unknown>)?.command;
-      if (typeof cmd !== "string" || !cmd) return { continue: true };
-
-      // Fast skip: commands RTK never rewrites
-      if (cmd.startsWith("rtk ") || cmd.includes("<<")) {
-        return { continue: true };
-      }
-
-      try {
-        const { stdout } = await execFileAsync(rtkPath, ["rewrite", cmd], {
-          timeout: 5000,
-          env: env as Record<string, string>,
-        });
-        const rewritten = stdout.trim();
-
-        if (!rewritten || rewritten === cmd) {
-          rtkLog("no rewrite: %s", cmd);
-          return { continue: true };
-        }
-
-        rtkLog("rewrite: %s -> %s", cmd, rewritten);
-        return {
-          hookSpecificOutput: {
-            hookEventName: "PreToolUse" as const,
-            permissionDecision: "allow" as const,
-            updatedInput: { command: rewritten },
-          },
-        };
-      } catch (err: any) {
-        if (err?.code === 1 || err?.status === 1) {
-          // Normal: rtk rewrite exits 1 when no rewrite applies
-          rtkLog("no rewrite: %s", cmd);
-        } else {
-          rtkLog("fallback (error): %s — %s", cmd, err?.message ?? err);
-        }
-        return { continue: true };
-      }
-    };
+    const rtkHook = createRtkHook({ rtkPath, env, log: rtkLog });
 
     // Resolve custom Claude Code binary
     const resolved = resolveClaudeCodeExecutable(
@@ -550,77 +487,13 @@ export class SessionManager {
       (merged.hooks.PreToolUse ??= []).push({ matcher: "Bash", hooks: [rtkHook] });
     }
 
-    // Build spawnClaudeCodeProcess override:
-    // - Standalone binary: spawn the binary directly
-    // - Non-standalone: always inject --preload for fetch interception (stats + network inspector)
-    let spawnOverride:
-      | ((spawnOpts: import("@anthropic-ai/claude-agent-sdk").SpawnOptions) => SpawnedProcess)
-      | undefined;
-
-    if (resolved.standalone) {
-      spawnOverride = (spawnOpts) =>
-        spawn(resolved.executable, spawnOpts.args, {
-          cwd: spawnOpts.cwd,
-          env: spawnOpts.env,
-          signal: spawnOpts.signal,
-          stdio: ["pipe", "pipe", "pipe"],
-        }) as unknown as SpawnedProcess;
-    } else {
-      spawnOverride = (spawnOpts) => {
-        const interceptorPath = resolveInterceptorPath();
-        log("spawnClaudeCodeProcess: interceptor=%s sessionId=%s", interceptorPath, sessionId);
-
-        const child = spawn(spawnOpts.command, ["--preload", interceptorPath, ...spawnOpts.args], {
-          cwd: spawnOpts.cwd,
-          env: {
-            ...spawnOpts.env,
-            NV_SESSION_ID: sessionId,
-            ...(settingsEnv?.ANTHROPIC_BASE_URL
-              ? { ANTHROPIC_BASE_URL: settingsEnv.ANTHROPIC_BASE_URL }
-              : {}),
-          },
-          signal: spawnOpts.signal,
-          stdio: ["pipe", "pipe", "pipe", "pipe"],
-        });
-
-        // Read interceptor data from fd 3 (dedicated IPC pipe)
-        let interceptorReady = false;
-        const ipcStream = child.stdio[3];
-        if (ipcStream && "on" in ipcStream) {
-          const rl = createInterface({ input: ipcStream as NodeJS.ReadableStream });
-          rl.on("line", (line: string) => {
-            if (line === "__NV_READY") {
-              interceptorReady = true;
-              log("interceptor ready: sessionId=%s", sessionId);
-              return;
-            }
-            if (!line.startsWith("__NV_REQ:")) {
-              log("interceptor fd3 unknown line: %s", line.slice(0, 100));
-              return;
-            }
-            try {
-              const msg = JSON.parse(line.slice("__NV_REQ:".length));
-              this.requestTracker.onMessage(sessionId, msg);
-            } catch (err) {
-              log(
-                "interceptor fd3 parse error: %s line=%s",
-                err instanceof Error ? err.message : err,
-                line.slice(0, 200),
-              );
-            }
-          });
-        }
-
-        setTimeout(() => {
-          if (!interceptorReady) {
-            log("WARNING: network interceptor did not initialize — sessionId=%s", sessionId);
-            this.requestTracker.markInspectorFailed(sessionId);
-          }
-        }, 5000);
-
-        return child as unknown as SpawnedProcess;
-      };
-    }
+    const spawnOverride = createSpawnOverride({
+      resolved,
+      sessionId,
+      settingsEnv,
+      requestTracker: this.requestTracker,
+      log,
+    });
 
     const options: Options = {
       ...queryOpts,
