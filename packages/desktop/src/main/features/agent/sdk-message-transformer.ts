@@ -15,17 +15,23 @@ import type {
   ClaudeCodeUIEvent,
 } from "../../../shared/claude-code/types";
 
-import { parseCliUserContent } from "../../../shared/claude-code/parse-cli-user-content";
 import { EditOutputSchema } from "../../../shared/claude-code/tools/edit";
 import { ReadOutputSchema } from "../../../shared/claude-code/tools/read";
 import {
+  claudeCodeMetadata,
+  emitParsedUserText,
+  finalizeAgentMessage,
+  isTopLevelParent,
+  reasoningPartId,
+  resultContentToText,
+  textPartId,
+} from "./transformer/parts-builder";
+import {
   isBase64ImageSource,
   isImageContentBlock,
-  isStringResultObject,
   isSyntheticUserMessage,
   isTaskOrAgentTool,
   isTextContentBlock,
-  isUrlImageSource,
 } from "./transformer/type-guards";
 
 type ActiveContentBlock =
@@ -37,7 +43,7 @@ type ActiveContentBlock =
       toolName: string;
       input: string;
       providerExecuted: true;
-      providerMetadata?: ReturnType<SDKMessageTransformer["claudeCodeMetadata"]>;
+      providerMetadata?: ReturnType<typeof claudeCodeMetadata>;
     };
 
 type SDKMessageTransformerOptions = {
@@ -200,7 +206,7 @@ export class SDKMessageTransformer {
           this.hasStarted = true;
           yield { type: "start", messageId: msg.message.id };
         }
-        if (this.isTopLevelParent(msg.parent_tool_use_id)) {
+        if (isTopLevelParent(msg.parent_tool_use_id, this.rootParentToolUseId)) {
           const isNewStep = msg.message.id !== this.currentMessageId;
           if (isNewStep) {
             if (this.inStep) yield { type: "finish-step" };
@@ -292,11 +298,11 @@ export class SDKMessageTransformer {
           yield {
             type: "tool-output-error",
             toolCallId: chunk.toolCallId,
-            errorText: this.resultContentToText(toolResult.content, true),
+            errorText: resultContentToText(toolResult.content, true),
             providerExecuted: true,
           };
         } else {
-          state.latestMessage = this.finalizeAgentMessage({
+          state.latestMessage = finalizeAgentMessage({
             toolCallId: chunk.toolCallId,
             sessionId: msg.session_id ?? "",
             baseMessage: state.latestMessage,
@@ -436,7 +442,7 @@ export class SDKMessageTransformer {
         messageId: event.message.id,
         messageMetadata: {
           sessionId: msg.session_id ?? "",
-          parentToolUseId: this.isTopLevelParent(msg.parent_tool_use_id)
+          parentToolUseId: isTopLevelParent(msg.parent_tool_use_id, this.rootParentToolUseId)
             ? null
             : msg.parent_tool_use_id,
         },
@@ -444,7 +450,7 @@ export class SDKMessageTransformer {
     }
 
     const isNewStep = event.message.id !== this.currentMessageId;
-    if (isNewStep && this.isTopLevelParent(msg.parent_tool_use_id)) {
+    if (isNewStep && isTopLevelParent(msg.parent_tool_use_id, this.rootParentToolUseId)) {
       if (this.inStep) {
         yield { type: "finish-step" };
       }
@@ -454,7 +460,7 @@ export class SDKMessageTransformer {
       this.contentBlocks.clear();
     }
 
-    this.currentParentToolUseId = this.isTopLevelParent(msg.parent_tool_use_id)
+    this.currentParentToolUseId = isTopLevelParent(msg.parent_tool_use_id, this.rootParentToolUseId)
       ? null
       : msg.parent_tool_use_id;
     this.currentStreamHasUnsupportedBlocks = false;
@@ -470,21 +476,21 @@ export class SDKMessageTransformer {
 
     switch (event.content_block.type) {
       case "text": {
-        const partId = this.textPartId(this.currentMessageId, event.index);
+        const partId = textPartId(this.currentMessageId, event.index);
         this.contentBlocks.set(event.index, { type: "text", id: partId });
         yield { type: "text-start", id: partId };
         return;
       }
 
       case "thinking": {
-        const partId = this.reasoningPartId(this.currentMessageId, event.index);
+        const partId = reasoningPartId(this.currentMessageId, event.index);
         this.contentBlocks.set(event.index, { type: "reasoning", id: partId });
         yield { type: "reasoning-start", id: partId };
         return;
       }
 
       case "redacted_thinking": {
-        const partId = this.reasoningPartId(this.currentMessageId, event.index);
+        const partId = reasoningPartId(this.currentMessageId, event.index);
         this.contentBlocks.set(event.index, { type: "reasoning", id: partId });
         yield {
           type: "reasoning-start",
@@ -517,7 +523,10 @@ export class SDKMessageTransformer {
         ? JSON.stringify(contentBlock.input)
         : "";
 
-    const providerMetadata = this.claudeCodeMetadata(this.currentParentToolUseId);
+    const providerMetadata = claudeCodeMetadata(
+      this.currentParentToolUseId,
+      this.rootParentToolUseId,
+    );
     this.contentBlocks.set(index, {
       type: "tool-call",
       toolCallId: contentBlock.id,
@@ -691,7 +700,7 @@ export class SDKMessageTransformer {
             toolName: part.name,
             input: part.input,
             providerExecuted: true,
-            providerMetadata: this.claudeCodeMetadata(msg.parent_tool_use_id),
+            providerMetadata: claudeCodeMetadata(msg.parent_tool_use_id, this.rootParentToolUseId),
           };
           break;
         }
@@ -711,7 +720,7 @@ export class SDKMessageTransformer {
       if (this.shouldSkipNestedPromptText(msg.parent_tool_use_id, content)) {
         return;
       }
-      yield* this.emitParsedUserText(content, message.uuid);
+      yield* emitParsedUserText(content, message.uuid);
       return;
     }
 
@@ -742,41 +751,11 @@ export class SDKMessageTransformer {
           if (this.shouldSkipNestedPromptText(msg.parent_tool_use_id, part.text)) {
             break;
           }
-          yield* this.emitParsedUserText(part.text, message.uuid);
+          yield* emitParsedUserText(part.text, message.uuid);
           break;
         }
       }
     }
-  }
-
-  /**
-   * Parse a raw user text payload through the CLI protocol→semantic translator
-   * and yield the corresponding chunks (text and/or `data-slash-command`).
-   * Empty input emits nothing — callers should pre-skip if they want a
-   * different fallback.
-   */
-  private *emitParsedUserText(text: string, uuid: string): Generator<ClaudeCodeUIMessageChunk> {
-    const parsed = parseCliUserContent(text);
-    if (parsed.parts.length === 0) return;
-    let counter = 0;
-    for (const part of parsed.parts) {
-      if (part.type === "data-slash-command") {
-        yield {
-          type: "data-slash-command",
-          id: `${uuid}-cmd-${counter++}`,
-          data: part.data,
-        };
-      } else if (part.type === "text") {
-        const textId = `${uuid}-text-${counter++}`;
-        yield { type: "text-start", id: textId };
-        yield { type: "text-delta", id: textId, delta: part.text };
-        yield { type: "text-end", id: textId };
-      }
-    }
-  }
-
-  private claudeCodeMetadata(parentToolUseId: string | null | undefined) {
-    return this.isTopLevelParent(parentToolUseId) ? undefined : { claudeCode: { parentToolUseId } };
   }
 
   // Claude Code emits both:
@@ -816,61 +795,6 @@ export class SDKMessageTransformer {
     return prompt != null && prompt === text;
   }
 
-  private isTopLevelParent(parentToolUseId: string | null | undefined) {
-    return parentToolUseId == null || parentToolUseId === this.rootParentToolUseId;
-  }
-
-  private finalizeAgentMessage({
-    toolCallId,
-    sessionId,
-    baseMessage,
-    result,
-    isError,
-  }: {
-    toolCallId: string;
-    sessionId: string;
-    baseMessage?: ClaudeCodeUIMessage;
-    result: unknown;
-    isError: boolean;
-  }): ClaudeCodeUIMessage {
-    const parts = [
-      ...(baseMessage?.parts ?? []),
-      ...this.resultContentToMessageParts(result, isError),
-    ];
-
-    return {
-      id: `agent:${toolCallId}`,
-      role: "assistant",
-      metadata: {
-        sessionId,
-        parentToolUseId: null,
-      },
-      parts,
-    } as ClaudeCodeUIMessage;
-  }
-
-  private resultContentToMessageParts(result: unknown, isError: boolean) {
-    const parts: ClaudeCodeUIMessage["parts"] = [];
-
-    // Handle image outputs
-    const imageParts = this.extractImageParts(result);
-    for (const imagePart of imageParts) {
-      parts.push(imagePart);
-    }
-
-    // Handle text outputs
-    const texts = this.resultContentToTexts(result, isError);
-    for (const text of texts) {
-      parts.push({
-        type: "text" as const,
-        text,
-        state: "done" as const,
-      });
-    }
-
-    return parts;
-  }
-
   private resolveToolOutput(toolCallId: string, content: unknown, message: any): unknown {
     if (this.contentOutputTools.has(toolCallId)) {
       return content;
@@ -896,82 +820,6 @@ export class SDKMessageTransformer {
     const converted = entry.convert(content);
     const result = entry.schema.safeParse(converted);
     return result.success ? result.data : undefined;
-  }
-
-  private parseReadToolContentLegacy(content: unknown) {
-    if (typeof content === "string") return { text: content, images: [] };
-    if (!Array.isArray(content))
-      return { text: content != null ? JSON.stringify(content) : "", images: [] };
-
-    const texts: string[] = [];
-    const images: { url: string; mediaType: string; filename?: string }[] = [];
-    for (const block of content) {
-      if (isTextContentBlock(block)) {
-        texts.push(block.text);
-      } else if (isImageContentBlock(block)) {
-        const src = block.source;
-        if (isBase64ImageSource(src)) {
-          images.push({
-            url: `data:${src.media_type || "image/png"};base64,${src.data}`,
-            mediaType: src.media_type || "image/png",
-            filename: block.filename,
-          });
-        } else if (isUrlImageSource(src)) {
-          images.push({
-            url: src.url,
-            mediaType: src.media_type || "image/png",
-            filename: block.filename,
-          });
-        }
-      }
-    }
-    return { text: texts.join("\n"), images };
-  }
-
-  private extractImageParts(result: unknown): ClaudeCodeUIMessage["parts"] {
-    const { images } = this.parseReadToolContentLegacy(result);
-    return images.map((img) => ({
-      type: "file" as const,
-      mediaType: img.mediaType,
-      url: img.url,
-      filename: img.filename,
-    }));
-  }
-
-  private resultContentToText(result: unknown, isError: boolean) {
-    return this.resultContentToTexts(result, isError).join("\n");
-  }
-
-  private resultContentToTexts(result: unknown, isError: boolean) {
-    const texts: string[] = [];
-
-    if (typeof result === "string") {
-      texts.push(result);
-    } else if (Array.isArray(result)) {
-      for (const part of result) {
-        if (isTextContentBlock(part)) {
-          texts.push(part.text);
-        }
-      }
-    } else if (isStringResultObject(result)) {
-      texts.push(result.result);
-    } else if (result != null) {
-      texts.push(JSON.stringify(result));
-    }
-
-    return texts.length === 0 ? [isError ? "Task failed" : "Task completed"] : texts;
-  }
-
-  // AI SDK only requires a stable per-part id so start/delta/end can be merged.
-  // Anthropic's provider can use the raw content block index because it streams a
-  // single model response at a time. We replay many assistant messages through one
-  // UI stream, so the block index alone would collide across messages.
-  private textPartId(messageId: string, index: number) {
-    return `text:${messageId}:${index}`;
-  }
-
-  private reasoningPartId(messageId: string, index: number) {
-    return `reasoning:${messageId}:${index}`;
   }
 }
 
