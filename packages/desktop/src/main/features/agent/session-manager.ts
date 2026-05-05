@@ -57,6 +57,7 @@ import {
 import { readModelSetting, readProviderSetting, readProviderModelSetting } from "./claude-settings";
 import { Pushable } from "./pushable";
 import { SDKMessageTransformer, toUIEvent } from "./sdk-message-transformer";
+import { ENV_BLOCKLIST, INIT_TIMEOUT_MS, type SessionEntry } from "./session/types";
 import { sessionMessagesToUIMessages } from "./utils/session-messages-to-ui-messages";
 
 const log = debug("neovate:session-manager");
@@ -91,47 +92,12 @@ async function listSessionFiles(filter?: string): Promise<string[]> {
   return perDir.flat();
 }
 
-/** Timeout for SDK initializationResult() to prevent hanging sessions. */
-const INIT_TIMEOUT_MS = 30_000;
-
-const ENV_BLOCKLIST = new Set([
-  "ELECTRON_RUN_AS_NODE",
-  "NODE_OPTIONS",
-  "PATH",
-  "HOME",
-  "SHELL",
-  "USER",
-  "LD_PRELOAD",
-  "DYLD_INSERT_LIBRARIES",
-]);
-
 export class SessionManager {
   // Single global publisher — sessionId is the channel key
   readonly eventPublisher = new EventPublisher<Record<string, ClaudeCodeUIEvent>>();
 
   // Per-session state
-  private sessions = new Map<
-    string,
-    {
-      input: Pushable<SDKUserMessage>;
-      query: Query;
-      cwd: string;
-      providerId?: string;
-      model?: string;
-      createdAt: number;
-      lastUserMessageId?: string;
-      preTurnRef?: string;
-      consumeExited: boolean;
-      /** Maps UI message IDs to SDK UUIDs for rewind. */
-      uiToSdkMessageIds: Map<string, string>;
-      pendingRequests: Map<
-        string,
-        {
-          resolve: (result: import("@anthropic-ai/claude-agent-sdk").PermissionResult) => void;
-        }
-      >;
-    }
-  >();
+  private sessions = new Map<string, SessionEntry>();
 
   private lifecycleListeners: Array<(event: SessionLifecycleEvent) => void> = [];
   private emittedCreatedSessions = new Set<string>();
