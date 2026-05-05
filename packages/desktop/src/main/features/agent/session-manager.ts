@@ -31,13 +31,15 @@ import {
   type FacadeContext,
   loadSession as loadSessionFn,
 } from "./session/facade";
+import {
+  type ForkContext,
+  forkSession as forkSessionFn,
+  rewindToMessage as rewindToMessageFn,
+} from "./session/fork";
 import { type InitContext } from "./session/init";
 import {
-  findPrevMessageId,
   lastTurnDiff as lastTurnDiffFn,
   lastTurnFiles as lastTurnFilesFn,
-  resolveForkLastMessageId,
-  resolveSdkMessageId,
   rewindFilesDryRun as rewindFilesDryRunFn,
 } from "./session/rewind-fork";
 import { sendUserMessage, type SendContext } from "./session/send";
@@ -72,6 +74,7 @@ export class SessionManager {
   private readonly dispatchContext: DispatchContext;
   private readonly closeContext: CloseContext;
   private readonly facadeContext: FacadeContext;
+  private readonly forkContext: ForkContext;
 
   constructor(
     private configStore: ConfigStore,
@@ -120,6 +123,13 @@ export class SessionManager {
       configStore: this.configStore,
       projectStore: this.projectStore,
       initContext: this.initContext,
+      log,
+    };
+    this.forkContext = {
+      sessions: this.sessions,
+      closeSession: (id) => this.closeSession(id),
+      createSession: (cwd) => this.createSession(cwd),
+      emitLifecycle: (event) => this.emitLifecycle(event),
       log,
     };
   }
@@ -264,45 +274,7 @@ export class SessionManager {
     restoreFiles: boolean,
     title?: string,
   ): Promise<RewindResult> {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Unknown session: ${sessionId}`);
-    const sdkMessageId = resolveSdkMessageId(session, messageId);
-
-    // 1. Restore files if requested (on the ORIGINAL session, which has file history)
-    if (restoreFiles) {
-      await session.query.rewindFiles(sdkMessageId, { dryRun: false });
-    }
-
-    // 2. Resolve the message immediately before the target for the fork point
-    const prevMessageId = await findPrevMessageId(sessionId, sdkMessageId);
-
-    // 3. Fork the conversation
-    const { forkSession } = await import("@anthropic-ai/claude-agent-sdk");
-    let forkedSessionId: string;
-    if (prevMessageId) {
-      const result = await forkSession(sessionId, {
-        upToMessageId: prevMessageId,
-        dir: session.cwd,
-        title,
-      });
-      forkedSessionId = result.sessionId;
-    } else {
-      // Rewinding to first message — create a fresh session
-      const result = await this.createSession(session.cwd);
-      forkedSessionId = result.sessionId;
-    }
-
-    // 4. Close original session's Query (keep .jsonl on disk)
-    await this.closeSession(sessionId);
-
-    log(
-      "rewindToMessage: original=%s forked=%s restoreFiles=%s",
-      sessionId,
-      forkedSessionId,
-      restoreFiles,
-    );
-
-    return { forkedSessionId, originalSessionId: sessionId };
+    return rewindToMessageFn(this.forkContext, sessionId, messageId, restoreFiles, title);
   }
 
   /**
@@ -314,34 +286,7 @@ export class SessionManager {
     cwd: string,
     title?: string,
   ): Promise<{ forkedSessionId: string; originalSessionId: string }> {
-    const forkTitle = title ? `${title} (Fork)` : "(Fork)";
-
-    // Find the last message ID — needed by SDK's forkSession
-    const { forkSession } = await import("@anthropic-ai/claude-agent-sdk");
-
-    const lastMessageId = await resolveForkLastMessageId(sessionId, this.sessions.get(sessionId));
-
-    const result = await forkSession(sessionId, {
-      upToMessageId: lastMessageId,
-      dir: cwd,
-      title: forkTitle,
-    });
-
-    const now = new Date().toISOString();
-    this.emitLifecycle({
-      type: "created",
-      session: {
-        sessionId: result.sessionId,
-        cwd,
-        createdAt: now,
-        updatedAt: now,
-        title: forkTitle,
-      },
-    });
-
-    log("forkSession: original=%s forked=%s", sessionId, result.sessionId);
-
-    return { forkedSessionId: result.sessionId, originalSessionId: sessionId };
+    return forkSessionFn(this.forkContext, sessionId, cwd, title);
   }
 
   /** Delete a session's .jsonl file from disk. */
