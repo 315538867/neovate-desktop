@@ -14,6 +14,7 @@ import {
   resolveSkillSource,
   scanSkillDirs,
 } from "../skill-utils";
+import { safeExtractZip } from "./zip-extract";
 
 const log = debug("neovate:skills:clawhub");
 
@@ -169,7 +170,7 @@ export class ClawhubInstaller implements SkillInstaller {
     await writeFile(zipPath, buffer);
 
     const zip = new AdmZip(zipPath);
-    zip.extractAllTo(destDir, true);
+    safeExtractZip(zip, destDir);
 
     // Clean up the zip file
     await rm(zipPath, { force: true }).catch(() => {});
