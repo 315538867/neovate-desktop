@@ -2,7 +2,6 @@ import type {
   Query,
   Options,
   SDKUserMessage,
-  SDKSessionInfo,
   PermissionMode as SDKPermissionMode,
 } from "@anthropic-ai/claude-agent-sdk";
 
@@ -10,8 +9,6 @@ import { EventPublisher } from "@orpc/server";
 import debug from "debug";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFile, copyFile, mkdir, readdir, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -40,7 +37,6 @@ import type { RequestTracker } from "./request-tracker";
 
 import { extractReadableUserText } from "../../../shared/claude-code/extract-readable-user-text";
 import { lookupContextWindow } from "../../../shared/claude-code/model-context-windows";
-import { APP_DATA_DIR } from "../../core/app-paths";
 import { mergeAgentContributions } from "../../core/plugin/contributions";
 import { PowerBlockerService } from "../../core/power-blocker-service";
 import { shellEnvService } from "../../core/shell-service";
@@ -59,40 +55,18 @@ import {
   createRtkHook,
   createSpawnOverride,
 } from "./session/lifecycle";
+import {
+  appendCustomTitle,
+  archiveSessionFiles,
+  buildBirthtimeMap,
+  deleteSessionFiles,
+  projectSessionInfo,
+} from "./session/store";
 import { INIT_TIMEOUT_MS, type SessionEntry } from "./session/types";
 import { sessionMessagesToUIMessages } from "./utils/session-messages-to-ui-messages";
 
 const log = debug("neovate:session-manager");
 const rtkLog = debug("neovate:rtk");
-
-/** List .jsonl files one level deep under `~/.claude/projects/` */
-async function listSessionFiles(filter?: string): Promise<string[]> {
-  const baseDir = path.join(homedir(), ".claude", "projects");
-  let dirs: string[];
-  try {
-    const entries = await readdir(baseDir, { withFileTypes: true });
-    dirs = entries.filter((d) => d.isDirectory()).map((d) => d.name);
-  } catch {
-    return [];
-  }
-  const perDir = await Promise.all(
-    dirs.map(async (dir) => {
-      try {
-        const files = await readdir(path.join(baseDir, dir));
-        const matched: string[] = [];
-        for (const f of files) {
-          if (filter ? f === filter : f.endsWith(".jsonl")) {
-            matched.push(path.join(baseDir, dir, f));
-          }
-        }
-        return matched;
-      } catch {
-        return [];
-      }
-    }),
-  );
-  return perDir.flat();
-}
 
 export class SessionManager {
   // Single global publisher — sessionId is the channel key
@@ -594,33 +568,12 @@ export class SessionManager {
     const t0 = performance.now();
 
     const { listSessions: sdkListSessions } = await import("@anthropic-ai/claude-agent-sdk");
-    const sessions: SDKSessionInfo[] = await sdkListSessions(cwd ? { dir: cwd } : undefined);
+    const sessions = await sdkListSessions(cwd ? { dir: cwd } : undefined);
 
     // Build sessionId -> file birthtime map for accurate createdAt
-    const sessionFiles = await listSessionFiles();
-    const birthtimeMap = new Map<string, Date>();
-    const statResults = await Promise.all(
-      sessionFiles.map(async (file) => {
-        try {
-          const id = path.basename(file, ".jsonl");
-          const { birthtime } = await stat(file);
-          return [id, birthtime] as const;
-        } catch {
-          return null;
-        }
-      }),
-    );
-    for (const entry of statResults) {
-      if (entry) birthtimeMap.set(entry[0], entry[1]);
-    }
+    const birthtimeMap = await buildBirthtimeMap();
 
-    const result: SessionInfo[] = sessions.map((s) => ({
-      sessionId: s.sessionId,
-      title: s.customTitle ?? s.summary ?? s.firstPrompt?.slice(0, 50) ?? "New Session",
-      cwd: s.cwd,
-      updatedAt: new Date(s.lastModified).toISOString(),
-      createdAt: (birthtimeMap.get(s.sessionId) ?? new Date(s.lastModified)).toISOString(),
-    }));
+    const result = projectSessionInfo(sessions, birthtimeMap);
 
     log("listSessions: DONE in %dms count=%d", Math.round(performance.now() - t0), result.length);
     return result;
@@ -628,12 +581,7 @@ export class SessionManager {
 
   async renameSession(sessionId: string, title: string): Promise<void> {
     log("renameSession: sessionId=%s title=%s", sessionId, title);
-    const matches = await listSessionFiles(`${sessionId}.jsonl`);
-    if (matches.length === 0) {
-      throw new Error(`Session file not found: ${sessionId}`);
-    }
-    const entry = JSON.stringify({ type: "custom-title", customTitle: title, sessionId });
-    await appendFile(matches[0], entry + "\n");
+    await appendCustomTitle(sessionId, title);
     log("renameSession: DONE sessionId=%s", sessionId);
   }
 
@@ -892,24 +840,7 @@ export class SessionManager {
 
   /** Delete a session's .jsonl file from disk. */
   async deleteSessionFile(sessionId: string): Promise<void> {
-    const matches = await listSessionFiles(`${sessionId}.jsonl`);
-    if (matches.length === 0) {
-      log("deleteSessionFile: no file found for sessionId=%s", sessionId);
-      return;
-    }
-    const { unlink } = await import("node:fs/promises");
-    for (const file of matches) {
-      try {
-        await unlink(file);
-        log("deleteSessionFile: deleted %s", file);
-      } catch (error) {
-        log(
-          "deleteSessionFile: failed to delete %s error=%s",
-          file,
-          error instanceof Error ? error.message : error,
-        );
-      }
-    }
+    await deleteSessionFiles(sessionId, log);
 
     const now = new Date().toISOString();
     this.emitLifecycle({
@@ -932,51 +863,7 @@ export class SessionManager {
       cwd?: string;
     },
   ): Promise<void> {
-    const matches = await listSessionFiles(`${sessionId}.jsonl`);
-    if (matches.length === 0) {
-      log("archiveSessionFile: no file found for sessionId=%s", sessionId);
-      return;
-    }
-
-    const backupDir = path.join(APP_DATA_DIR, "rewind-history", sessionId);
-    await mkdir(backupDir, { recursive: true });
-
-    const now = new Date();
-    const timestamp = now.toISOString().replace(/:/g, "-").replace(/\./g, "-");
-
-    await copyFile(matches[0], path.join(backupDir, `${timestamp}.jsonl`));
-
-    const metaJson = JSON.stringify(
-      {
-        originalSessionId: sessionId,
-        forkedSessionId: meta.forkedSessionId,
-        rewindMessageId: meta.rewindMessageId,
-        restoreFiles: meta.restoreFiles,
-        title: meta.title,
-        cwd: meta.cwd,
-        backedUpAt: now.toISOString(),
-      },
-      null,
-      2,
-    );
-    await writeFile(path.join(backupDir, `${timestamp}.meta.json`), metaJson, "utf-8");
-
-    log("archiveSessionFile: backed up sessionId=%s to %s", sessionId, backupDir);
-
-    // Delete original only after backup succeeds
-    const { unlink } = await import("node:fs/promises");
-    for (const file of matches) {
-      try {
-        await unlink(file);
-        log("archiveSessionFile: deleted %s", file);
-      } catch (error) {
-        log(
-          "archiveSessionFile: failed to delete %s error=%s",
-          file,
-          error instanceof Error ? error.message : error,
-        );
-      }
-    }
+    await archiveSessionFiles(sessionId, meta, log);
   }
 
   /**
