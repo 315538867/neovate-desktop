@@ -242,8 +242,10 @@ export class SDKMessageTransformer {
   }
 
   private *transformUser(msg: SDKMessage & { type: "user" }): Generator<ClaudeCodeUIMessageChunk> {
-    const message = msg as any;
-    const content = message.message?.content;
+    const content = msg.message?.content;
+    // SDK types `uuid` as optional but the runtime always populates it; the
+    // empty-string fallback only guards against a malformed SDK payload.
+    const uuid = msg.uuid ?? "";
 
     // Translate the CLI's external XML envelope (slash commands) into our
     // internal domain events here, so the live-stream path mirrors the
@@ -253,7 +255,7 @@ export class SDKMessageTransformer {
       if (this.shouldSkipNestedPromptText(msg.parent_tool_use_id, content)) {
         return;
       }
-      yield* emitParsedUserText(content, message.uuid);
+      yield* emitParsedUserText(content, uuid);
       return;
     }
 
@@ -270,7 +272,7 @@ export class SDKMessageTransformer {
               providerExecuted: true,
             };
           } else {
-            const output = this.resolveToolOutput(part.tool_use_id, part.content, message);
+            const output = this.resolveToolOutput(part.tool_use_id, part.content, msg);
             yield {
               type: "tool-output-available",
               toolCallId: part.tool_use_id,
@@ -284,7 +286,7 @@ export class SDKMessageTransformer {
           if (this.shouldSkipNestedPromptText(msg.parent_tool_use_id, part.text)) {
             break;
           }
-          yield* emitParsedUserText(part.text, message.uuid);
+          yield* emitParsedUserText(part.text, uuid);
           break;
         }
       }
@@ -328,13 +330,22 @@ export class SDKMessageTransformer {
     return prompt != null && prompt === text;
   }
 
-  private resolveToolOutput(toolCallId: string, content: unknown, message: any): unknown {
+  private resolveToolOutput(
+    toolCallId: string,
+    content: unknown,
+    message: SDKMessage & { type: "user" },
+  ): unknown {
     if (this.contentOutputTools.has(toolCallId)) {
       return content;
     }
     // The SDK may attach the structured result as either snake_case (wire format)
-    // or camelCase (JS-normalized). Check both to handle either convention.
-    const structured = message.tool_use_result ?? message.toolUseResult;
+    // or camelCase (JS-normalized). The camelCase variant isn't on the SDK type,
+    // so probe via `in` and narrow with a small structural cast.
+    const camelToolUseResult =
+      "toolUseResult" in message
+        ? (message as { toolUseResult?: unknown }).toolUseResult
+        : undefined;
+    const structured = message.tool_use_result ?? camelToolUseResult;
     if (structured !== undefined) return structured;
 
     // Restore path: tool_use_result is stripped by getSessionMessages,
@@ -386,10 +397,10 @@ export function toUIEvent(msg: SDKMessage): ClaudeCodeUIEvent | null {
     case "auth_status":
     case "prompt_suggestion":
     case "rate_limit_event": {
-      return { kind: "event", event: { id: (msg as any).uuid ?? crypto.randomUUID(), ...msg } };
+      return { kind: "event", event: { id: msg.uuid ?? crypto.randomUUID(), ...msg } };
     }
     case "system": {
-      const subtype = (msg as { subtype: string }).subtype;
+      const subtype = msg.subtype;
       if (
         subtype === "init" ||
         subtype === "compact_boundary" ||
@@ -398,7 +409,7 @@ export function toUIEvent(msg: SDKMessage): ClaudeCodeUIEvent | null {
         return null;
       return {
         kind: "event",
-        event: { id: (msg as any).uuid ?? crypto.randomUUID(), ...msg },
+        event: { id: msg.uuid ?? crypto.randomUUID(), ...msg },
       } as ClaudeCodeUIEvent;
     }
     default:
