@@ -56,6 +56,14 @@ import {
   createSpawnOverride,
 } from "./session/lifecycle";
 import {
+  findPrevMessageId,
+  lastTurnDiff as lastTurnDiffFn,
+  lastTurnFiles as lastTurnFilesFn,
+  resolveForkLastMessageId,
+  resolveSdkMessageId,
+  rewindFilesDryRun as rewindFilesDryRunFn,
+} from "./session/rewind-fork";
+import {
   appendCustomTitle,
   archiveSessionFiles,
   buildBirthtimeMap,
@@ -647,17 +655,7 @@ export class SessionManager {
   async lastTurnFiles(sessionId: string): Promise<RewindFilesResult> {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Unknown session: ${sessionId}`);
-    if (!session.lastUserMessageId) {
-      return { canRewind: false, error: "No turns completed yet" };
-    }
-    try {
-      return await session.query.rewindFiles(session.lastUserMessageId, { dryRun: true });
-    } catch (error) {
-      return {
-        canRewind: false,
-        error: error instanceof Error ? error.message : "Failed to get last turn files",
-      };
-    }
+    return lastTurnFilesFn(session);
   }
 
   /** Get the diff for a single file changed in the last agent turn. */
@@ -671,65 +669,14 @@ export class SessionManager {
   }> {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Unknown session: ${sessionId}`);
-
-    const ref = session.preTurnRef;
-    if (!ref) {
-      return { success: false, error: "No pre-turn snapshot available" };
-    }
-
-    try {
-      // Old content: from the pre-turn snapshot
-      let oldContent = "";
-      try {
-        const { stdout } = await execFileAsync("git", ["show", `${ref}:${file}`], {
-          cwd: session.cwd,
-          maxBuffer: 10 * 1024 * 1024,
-        });
-        oldContent = stdout;
-      } catch {
-        // file didn't exist before this turn
-      }
-
-      // New content: current file on disk
-      let newContent = "";
-      try {
-        const fs = await import("node:fs/promises");
-        const filePath = path.resolve(session.cwd, file);
-        newContent = await fs.readFile(filePath, "utf8");
-      } catch {
-        // file was deleted during this turn
-      }
-
-      return { success: true, data: { oldContent, newContent } };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Failed to get diff",
-      };
-    }
-  }
-
-  /** Resolve a UI message ID to the SDK UUID used for rewind operations. */
-  private resolveSdkMessageId(
-    session: { uiToSdkMessageIds: Map<string, string> },
-    uiMessageId: string,
-  ): string {
-    return session.uiToSdkMessageIds.get(uiMessageId) ?? uiMessageId;
+    return lastTurnDiffFn(session, file);
   }
 
   /** Dry-run: get the list of files that would change if we rewound to this message. */
   async rewindFilesDryRun(sessionId: string, messageId: string): Promise<RewindFilesResult> {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Unknown session: ${sessionId}`);
-    const sdkMessageId = this.resolveSdkMessageId(session, messageId);
-    try {
-      return await session.query.rewindFiles(sdkMessageId, { dryRun: true });
-    } catch (error) {
-      return {
-        canRewind: false,
-        error: error instanceof Error ? error.message : "Failed to get rewind files",
-      };
-    }
+    return rewindFilesDryRunFn(session, messageId);
   }
 
   /**
@@ -744,7 +691,7 @@ export class SessionManager {
   ): Promise<RewindResult> {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Unknown session: ${sessionId}`);
-    const sdkMessageId = this.resolveSdkMessageId(session, messageId);
+    const sdkMessageId = resolveSdkMessageId(session, messageId);
 
     // 1. Restore files if requested (on the ORIGINAL session, which has file history)
     if (restoreFiles) {
@@ -752,7 +699,7 @@ export class SessionManager {
     }
 
     // 2. Resolve the message immediately before the target for the fork point
-    const prevMessageId = await this.findPrevMessageId(sessionId, sdkMessageId);
+    const prevMessageId = await findPrevMessageId(sessionId, sdkMessageId);
 
     // 3. Fork the conversation
     const { forkSession } = await import("@anthropic-ai/claude-agent-sdk");
@@ -795,25 +742,9 @@ export class SessionManager {
     const forkTitle = title ? `${title} (Fork)` : "(Fork)";
 
     // Find the last message ID — needed by SDK's forkSession
-    const { forkSession, getSessionMessages } = await import("@anthropic-ai/claude-agent-sdk");
+    const { forkSession } = await import("@anthropic-ai/claude-agent-sdk");
 
-    const session = this.sessions.get(sessionId);
-    let lastMessageId: string | undefined;
-
-    if (session) {
-      // Active session: get last ID from the UI-to-SDK mapping
-      const ids = Array.from(session.uiToSdkMessageIds.values());
-      lastMessageId = ids[ids.length - 1];
-    }
-
-    if (!lastMessageId) {
-      // Persisted session (or active with no mapped IDs): read from disk
-      const messages = await getSessionMessages(sessionId);
-      if (messages.length === 0) {
-        throw new Error("Cannot fork a session with no messages");
-      }
-      lastMessageId = messages[messages.length - 1].uuid;
-    }
+    const lastMessageId = await resolveForkLastMessageId(sessionId, this.sessions.get(sessionId));
 
     const result = await forkSession(sessionId, {
       upToMessageId: lastMessageId,
@@ -864,24 +795,6 @@ export class SessionManager {
     },
   ): Promise<void> {
     await archiveSessionFiles(sessionId, meta, log);
-  }
-
-  /**
-   * Find the SDK UUID of the message immediately before the target in the
-   * session transcript. Returns undefined if the target is the first message.
-   */
-  private async findPrevMessageId(
-    sessionId: string,
-    targetMessageId: string,
-  ): Promise<string | undefined> {
-    const { getSessionMessages } = await import("@anthropic-ai/claude-agent-sdk");
-    const messages = await getSessionMessages(sessionId);
-    let prevUuid: string | undefined;
-    for (const msg of messages) {
-      if (msg.uuid === targetMessageId) return prevUuid;
-      prevUuid = msg.uuid;
-    }
-    return undefined;
   }
 
   /**
