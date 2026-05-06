@@ -18,7 +18,16 @@ export interface PendingContextClear {
 }
 
 export interface ClaudeCodeChatStoreState {
-  messages: ClaudeCodeUIMessage[];
+  /**
+   * Completed messages whose content will not change. Reference is stable
+   * across streaming frames so memoized list components can skip reconciles.
+   */
+  stableMessages: ClaudeCodeUIMessage[];
+  /**
+   * The single in-flight assistant message during streaming. `null` when
+   * idle. Promoted into `stableMessages` on `commitStreamingMessage()`.
+   */
+  streamingMessage: ClaudeCodeUIMessage | null;
   status: ChatStatus;
   error: Error | undefined;
   eventError: Error | undefined;
@@ -39,12 +48,25 @@ export interface ClaudeCodeChatStoreState {
   lastChunkAt: number | null;
 }
 
+/**
+ * Cache for derived `messages` array. Recomputed only when stableMessages or
+ * streamingMessage reference changes. This keeps `state.messages.at(-1)` and
+ * `state.messages.findIndex(...)` callers cheap.
+ */
+type DerivedCache = {
+  stable: ClaudeCodeUIMessage[];
+  streaming: ClaudeCodeUIMessage | null;
+  combined: ClaudeCodeUIMessage[];
+};
+
 export class ClaudeCodeChatState implements ChatState<ClaudeCodeUIMessage> {
   readonly store: StoreApi<ClaudeCodeChatStoreState>;
+  #cache: DerivedCache | null = null;
 
   constructor(initialMessages: ClaudeCodeUIMessage[] = []) {
     this.store = createStore<ClaudeCodeChatStoreState>()(() => ({
-      messages: initialMessages,
+      stableMessages: initialMessages,
+      streamingMessage: null,
       status: "ready",
       error: undefined,
       eventError: undefined,
@@ -58,12 +80,24 @@ export class ClaudeCodeChatState implements ChatState<ClaudeCodeUIMessage> {
     }));
   }
 
-  get messages() {
-    return this.store.getState().messages;
+  get messages(): ClaudeCodeUIMessage[] {
+    const { stableMessages, streamingMessage } = this.store.getState();
+    if (
+      this.#cache &&
+      this.#cache.stable === stableMessages &&
+      this.#cache.streaming === streamingMessage
+    ) {
+      return this.#cache.combined;
+    }
+    const combined = streamingMessage ? [...stableMessages, streamingMessage] : stableMessages;
+    this.#cache = { stable: stableMessages, streaming: streamingMessage, combined };
+    return combined;
   }
 
   set messages(messages: ClaudeCodeUIMessage[]) {
-    this.store.setState({ messages });
+    // External overwrite (rewind, fork, load): treat all as stable, drop
+    // any in-flight streaming message.
+    this.store.setState({ stableMessages: messages, streamingMessage: null });
   }
 
   get status() {
@@ -93,6 +127,10 @@ export class ClaudeCodeChatState implements ChatState<ClaudeCodeUIMessage> {
     this.store.setState({ error });
   }
 
+  /**
+   * Append a finished message (user message, system event message). Goes
+   * straight into `stableMessages` — never into the streaming slot.
+   */
   pushMessage = (message: ClaudeCodeUIMessage) => {
     const now = Date.now();
     const state = this.store.getState();
@@ -107,14 +145,24 @@ export class ClaudeCodeChatState implements ChatState<ClaudeCodeUIMessage> {
 
     this.store.setState((s) => ({
       ...timingUpdate,
-      messages: s.messages.concat(this.snapshot(message)),
+      stableMessages: s.stableMessages.concat(this.snapshot(message)),
     }));
   };
 
   popMessage = () => {
-    this.store.setState((state) => ({ messages: state.messages.slice(0, -1) }));
+    this.store.setState((state) => {
+      // Prefer dropping the in-flight streaming message; fall back to the
+      // last stable entry. Mirrors the previous combined-array semantics.
+      if (state.streamingMessage) return { streamingMessage: null };
+      return { stableMessages: state.stableMessages.slice(0, -1) };
+    });
   };
 
+  /**
+   * AI SDK contract: index is into the combined `messages` array. We map it
+   * back to either the streaming slot or stableMessages, preserving the
+   * original "replace by index" semantics for callers.
+   */
   replaceMessage = (index: number, message: ClaudeCodeUIMessage) => {
     const now = Date.now();
     const state = this.store.getState();
@@ -135,14 +183,67 @@ export class ClaudeCodeChatState implements ChatState<ClaudeCodeUIMessage> {
       timingUpdate.lastChunkAt = now;
     }
 
+    const stableLen = state.stableMessages.length;
+    if (state.streamingMessage && index === stableLen) {
+      // Replacing the streaming slot — single-field write, stableMessages
+      // reference is preserved → memoized stable list skips render.
+      this.store.setState({ ...timingUpdate, streamingMessage: this.snapshot(message) });
+      return;
+    }
+
+    // Replacing a stable entry (rewind path: chat.ts:300 replaces the user
+    // message after slicing). stableMessages reference must change.
     this.store.setState((s) => ({
       ...timingUpdate,
-      messages: [
-        ...s.messages.slice(0, index),
+      stableMessages: [
+        ...s.stableMessages.slice(0, index),
         this.snapshot(message),
-        ...s.messages.slice(index + 1),
+        ...s.stableMessages.slice(index + 1),
       ],
     }));
+  };
+
+  /**
+   * Promote the in-flight streaming message to `stableMessages`. Called by
+   * chat.ts on `chunk.type === "finish"`. Idempotent.
+   */
+  commitStreamingMessage = () => {
+    this.store.setState((s) => {
+      if (!s.streamingMessage) return {};
+      return {
+        stableMessages: s.stableMessages.concat(s.streamingMessage),
+        streamingMessage: null,
+      };
+    });
+  };
+
+  /**
+   * Write the streaming-slot message. Used when the streaming turn produces
+   * its first/subsequent flush from chat.ts. Splits the previous
+   * `pushMessage`+`replaceMessage` codepath so callers don't need to track
+   * "is this the first frame" themselves.
+   */
+  setStreamingMessage = (message: ClaudeCodeUIMessage) => {
+    const now = Date.now();
+    const state = this.store.getState();
+    const lastPart = message.parts[message.parts.length - 1];
+    const isReasoning = lastPart?.type === "reasoning";
+
+    const timingUpdate: Partial<ClaudeCodeChatStoreState> = {};
+
+    if (isReasoning && !state.thinkingStartedAt) {
+      timingUpdate.thinkingStartedAt = now;
+    } else if (!isReasoning && state.thinkingStartedAt) {
+      timingUpdate.thinkingDuration =
+        (state.thinkingDuration ?? 0) + (now - state.thinkingStartedAt);
+      timingUpdate.thinkingStartedAt = null;
+    }
+
+    if (!isReasoning) {
+      timingUpdate.lastChunkAt = now;
+    }
+
+    this.store.setState({ ...timingUpdate, streamingMessage: this.snapshot(message) });
   };
 
   snapshot = <T>(value: T): T => structuredClone(value);

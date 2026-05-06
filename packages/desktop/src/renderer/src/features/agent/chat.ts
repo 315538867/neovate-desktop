@@ -126,11 +126,16 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
   #flushStreaming = () => {
     if (!this.#pendingFlush || !this.#streamingState) return;
     this.#pendingFlush = false;
+    // Single setter — chat-state routes the assistant message into the
+    // dedicated streaming slot, leaving stableMessages reference untouched
+    // so memoized list components can skip reconciles. Index tracking is
+    // retained (commitStreamingMessage on `finish` decides the final
+    // position) but we no longer mutate stableMessages every frame.
+    this.#state.setStreamingMessage(this.#streamingState.message);
     if (this.#messageIndex < 0) {
-      this.#state.pushMessage(this.#streamingState.message);
+      // Will become stableMessages.length once committed; record for
+      // legacy callers (none currently rely on this between push/commit).
       this.#messageIndex = this.#state.messages.length - 1;
-    } else {
-      this.#state.replaceMessage(this.#messageIndex, this.#streamingState.message);
     }
   };
 
@@ -212,6 +217,10 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
         // before nulling streamingState — otherwise the final delta is dropped.
         this.#cancelFlush();
         this.#flushStreaming();
+        // Promote the streaming slot into stableMessages — frees the
+        // streamingMessage subscription and lets the new entry participate
+        // in stable-list memoization on the next turn.
+        this.#state.commitStreamingMessage();
         this.#streamingState = null;
         // Don't overwrite error status — if onError was called, keep error state
         if (this.#state.status !== "error") {
