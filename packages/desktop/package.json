@@ -23,7 +23,9 @@
     "build:mac:dev": "bun run build && BUILD_ENV=dev electron-builder --mac --config configs/electron-builder.mjs",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:e2e": "bun run build && playwright test"
+    "test:e2e": "bun run build && playwright test",
+    "perf": "bun scripts/perf-benchmark.ts",
+    "perf:check": "bun scripts/perf-benchmark.ts -- --check"
   },
   "dependencies": {
     "@ai-sdk/provider-utils": "^4.0.22",
