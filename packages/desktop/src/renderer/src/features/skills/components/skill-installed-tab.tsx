@@ -19,6 +19,7 @@ import { client } from "../../../orpc";
 import { claudeCodeChatManager } from "../../agent/chat-manager";
 import { useProjectStore } from "../../project/store";
 import { SkillDetailModal } from "./skill-detail-modal";
+import { type SourceFilterValue, SourceFilter } from "./source-filter";
 
 const log = debug("neovate:settings:skills");
 
@@ -51,14 +52,31 @@ export const SkillInstalledTab = ({
 }: SkillInstalledTabProps) => {
   const { t } = useTranslation();
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("global");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilterValue>("all");
   const [selectedSkill, setSelectedSkill] = useState<SkillMeta | null>(null);
   const [togglingSkill, setTogglingSkill] = useState<string | null>(null);
 
-  const filteredSkills = useMemo(() => {
+  // Apply scope filter first so source counts reflect what the user can actually see.
+  const scopeFilteredSkills = useMemo(() => {
     if (scopeFilter === "all") return skills;
     if (scopeFilter === "global") return skills.filter((s) => s.scope === "global");
     return skills.filter((s) => s.scope === "project" && s.projectPath === scopeFilter);
   }, [skills, scopeFilter]);
+
+  const sourceCounts = useMemo(() => {
+    const counts: Partial<Record<SourceFilterValue, number>> = { all: scopeFilteredSkills.length };
+    for (const skill of scopeFilteredSkills) {
+      const key: SourceFilterValue = skill.source ?? "user";
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
+  }, [scopeFilteredSkills]);
+
+  const filteredSkills = useMemo(() => {
+    if (sourceFilter === "all") return scopeFilteredSkills;
+    if (sourceFilter === "user") return scopeFilteredSkills.filter((s) => s.source === undefined);
+    return scopeFilteredSkills.filter((s) => s.source === sourceFilter);
+  }, [scopeFilteredSkills, sourceFilter]);
 
   const getUpdate = useCallback(
     (skill: SkillMeta) =>
@@ -140,6 +158,15 @@ export const SkillInstalledTab = ({
           </SelectPopup>
         </Select>
       </div>
+
+      {scopeFilteredSkills.length > 0 && (
+        <SourceFilter
+          value={sourceFilter}
+          onChange={setSourceFilter}
+          counts={sourceCounts}
+          className="mb-3"
+        />
+      )}
 
       {filteredSkills.length === 0 ? (
         <div className="rounded-xl bg-card/60 border border-border/30 py-8">
