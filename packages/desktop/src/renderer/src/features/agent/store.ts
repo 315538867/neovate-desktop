@@ -11,6 +11,7 @@ import type {
   PermissionMode,
 } from "../../../../shared/features/agent/types";
 
+import { withReport } from "../../core/error-reporter";
 import { client } from "../../orpc";
 import { clearTurnResult } from "./hooks/use-unseen-turn-result";
 
@@ -292,7 +293,10 @@ export const useAgentStore = create<AgentState>()(
         );
       });
       if (createdAt) {
-        client.agent.session.updateSessionStartTime({ sessionId, createdAt }).catch(() => {});
+        void withReport(client.agent.session.updateSessionStartTime({ sessionId, createdAt }), {
+          op: "agent.updateSessionStartTime",
+          sessionId,
+        });
       }
     },
 

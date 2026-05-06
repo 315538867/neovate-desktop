@@ -51,11 +51,28 @@ import statsPlugin from "../plugins/stats";
 import terminalPlugin from "../plugins/terminal";
 import { startDeeplinkSubscription } from "./deeplink/subscription";
 import { DisposableStore } from "./disposable";
+import { setErrorSink } from "./error-reporter";
 import { ExternalUriOpenerService } from "./external-uri-opener";
 import { I18nManager } from "./i18n";
 import { OpenerService } from "./opener";
 import { PluginManager } from "./plugin";
 import { WorkbenchLayoutService } from "./workbench/layout";
+
+// Install renderer-wide error sink: surface reported errors via the toast UI.
+// Tests may override via `setErrorSink` directly.
+setErrorSink((err, ctx) => {
+  startupLog("error reported: %s %o", err.message, ctx ?? {});
+  toastManager.add({
+    type: "error",
+    title: err.message || "Operation failed",
+    description: ctx
+      ? Object.entries(ctx)
+          .map(([k, v]) => `${k}=${String(v)}`)
+          .join(" ")
+      : undefined,
+    timeout: 6000,
+  });
+});
 
 // Preserve context identity across HMR to prevent provider/consumer mismatch
 const RendererAppContext: React.Context<RendererApp | null> =

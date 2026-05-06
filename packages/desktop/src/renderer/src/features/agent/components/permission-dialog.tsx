@@ -6,6 +6,7 @@ import type { PlanApprovalChoice } from "./exit-plan-mode-request-dialog";
 
 import { AskUserQuestionInputSchema } from "../../../../../shared/claude-code/tools/ask-user-question";
 import { ExitPlanModeInputSchema } from "../../../../../shared/claude-code/tools/exit-plan-mode";
+import { withReport } from "../../../core/error-reporter";
 import { client } from "../../../orpc";
 import { useConfigStore } from "../../config/store";
 import { claudeCodeChatManager } from "../chat-manager";
@@ -125,7 +126,10 @@ export function PermissionDialog({ sessionId }: Props) {
     });
 
     // 4. Save plan to disk
-    client.agent.session.savePlan({ sessionId, plan: input.plan! }).catch(() => {});
+    void withReport(client.agent.session.savePlan({ sessionId, plan: input.plan! }), {
+      op: "agent.savePlan",
+      sessionId,
+    });
 
     // 5. If clear context, register pending action
     if (choice.clearContext) {

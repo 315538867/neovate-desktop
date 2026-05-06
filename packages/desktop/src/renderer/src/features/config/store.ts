@@ -6,6 +6,7 @@ const log = debug("neovate:config");
 
 import type { AppConfig } from "../../../../shared/features/config/types";
 
+import { withReport } from "../../core/error-reporter";
 import { DEFAULT_KEYBINDINGS, type KeybindingAction } from "../../lib/keybindings";
 import { client } from "../../orpc";
 
@@ -81,7 +82,10 @@ export const useConfigStore = create<ConfigState>()(
     // Generic setter - handles persistence automatically
     setConfig: (key, value) => {
       log("setConfig: key=%s", key, value);
-      client.config.set({ key, value } as any).catch(() => {});
+      void withReport(client.config.set({ key, value } as any), {
+        op: "config.set",
+        key,
+      });
       set({ [key]: value } as any);
     },
 
@@ -91,13 +95,18 @@ export const useConfigStore = create<ConfigState>()(
       set((state) => {
         state.keybindings[action] = binding;
       });
-      client.config.set({ key: "keybindings", value: get().keybindings }).catch(() => {});
+      void withReport(client.config.set({ key: "keybindings", value: get().keybindings }), {
+        op: "config.setKeybinding",
+        action,
+      });
     },
 
     resetKeybindings: () => {
       log("resetKeybindings");
       const keybindings = { ...DEFAULT_KEYBINDINGS } as KeybindingsConfig;
-      client.config.set({ key: "keybindings", value: keybindings }).catch(() => {});
+      void withReport(client.config.set({ key: "keybindings", value: keybindings }), {
+        op: "config.resetKeybindings",
+      });
       set({ keybindings });
     },
   })),

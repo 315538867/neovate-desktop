@@ -42,6 +42,8 @@ function archiveOriginalSession(
   },
 ) {
   import("../../../orpc").then(({ client }) => {
+    // noop: archive is bookkeeping — fork has already been activated, so failure here
+    // only leaves the original session file un-tagged on disk
     client.agent.session.archiveSessionFile({ sessionId, ...meta }).catch(() => {});
   });
 }

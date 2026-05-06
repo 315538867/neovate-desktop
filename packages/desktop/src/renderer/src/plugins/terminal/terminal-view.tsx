@@ -221,6 +221,7 @@ export default function TerminalView() {
     const onMouseUp = () => {
       if (xterm.hasSelection()) {
         const text = xterm.getSelection();
+        // noop: clipboard write may fail when document loses focus — non-critical
         if (text) navigator.clipboard.writeText(text).catch(() => {});
       }
     };

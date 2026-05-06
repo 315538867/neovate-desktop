@@ -162,6 +162,7 @@ export class ClaudeCodeChatManager {
     await chat.stop();
     await chat.dispose();
     this.chats.delete(sessionId);
+    // noop: best-effort SDK cleanup; chat is already stopped and disposed locally
     this.rpc.claudeCode.closeSession({ sessionId }).catch(() => {});
   }
 

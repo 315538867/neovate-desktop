@@ -6,6 +6,7 @@ const log = debug("neovate:project");
 
 import type { Project, ProjectInfo } from "../../../../shared/features/project/types";
 
+import { withReport } from "../../core/error-reporter";
 import { client } from "../../orpc";
 import { claudeCodeChatManager } from "../agent/chat-manager";
 import { findPreWarmedSession, registerSessionInStore } from "../agent/session-utils";
@@ -63,7 +64,11 @@ export const useProjectStore = create<ProjectState>()(
       const liveActive = useAgentStore.getState().activeSessionId === sessionId;
       const archivingActive = isActive || liveActive;
 
-      client.project.archiveSession({ projectPath, sessionId }).catch(() => {});
+      void withReport(client.project.archiveSession({ projectPath, sessionId }), {
+        op: "project.archiveSession",
+        projectPath,
+        sessionId,
+      });
       set((state) => {
         const list = state.archivedSessions[projectPath] ?? [];
         if (!list.includes(sessionId)) {
@@ -77,6 +82,7 @@ export const useProjectStore = create<ProjectState>()(
       });
 
       // Tear down SDK subprocess + renderer chat (no-op if not loaded)
+      // noop: best-effort cleanup; archive request above has already been reported
       claudeCodeChatManager.removeSession(sessionId).catch(() => {});
       useAgentStore.getState().removeSession(sessionId);
 
@@ -107,12 +113,17 @@ export const useProjectStore = create<ProjectState>()(
             );
             claudeCodeChatManager.preWarmForProject(projectPath);
           })
+          // noop: best-effort background pre-warm; failure is invisible to user
           .catch(() => {});
       }
     },
     togglePinSession: (projectPath, sessionId) => {
       log("toggle pin session", { projectPath, sessionId });
-      client.project.togglePinSession({ projectPath, sessionId }).catch(() => {});
+      void withReport(client.project.togglePinSession({ projectPath, sessionId }), {
+        op: "project.togglePinSession",
+        projectPath,
+        sessionId,
+      });
       set((state) => {
         const list = state.pinnedSessions[projectPath] ?? [];
         if (list.includes(sessionId)) {
@@ -123,7 +134,9 @@ export const useProjectStore = create<ProjectState>()(
       });
     },
     setClosedProjectAccordions: (ids) => {
-      client.project.setClosedAccordions({ ids }).catch(() => {});
+      void withReport(client.project.setClosedAccordions({ ids }), {
+        op: "project.setClosedAccordions",
+      });
       set({ closedProjectAccordions: ids });
     },
     reorderProjects: (projectIds) => {
@@ -135,7 +148,9 @@ export const useProjectStore = create<ProjectState>()(
         return p ? [p] : [];
       });
       set({ projects: reordered });
-      client.project.reorderProjects({ projectIds }).catch(() => {});
+      void withReport(client.project.reorderProjects({ projectIds }), {
+        op: "project.reorderProjects",
+      });
     },
     loadSessionPreferences: async () => {
       log("loading session preferences");
