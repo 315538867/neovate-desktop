@@ -1,3 +1,11 @@
+/**
+ * Discriminator placed on `ORPCError.data.kind` when a request fails because
+ * the OS keychain is offline (Wave 4.3 commit 7.2). The renderer reads this
+ * to decide whether to surface a keychain banner instead of a generic toast.
+ */
+export const KEYCHAIN_UNAVAILABLE_KIND = "KEYCHAIN_UNAVAILABLE" as const;
+export type KeychainUnavailableKind = typeof KEYCHAIN_UNAVAILABLE_KIND;
+
 export type Theme = "system" | "light" | "dark";
 export type ThemeStyle = "default" | "claude" | "codex" | "nord";
 export type SendMessageWith = "enter" | "cmdEnter";

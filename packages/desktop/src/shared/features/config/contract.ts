@@ -29,6 +29,13 @@ const sidebarSortByValueSchema = z.enum(["created", "updated"]);
 export const configContract = {
   get: oc.output(type<AppConfig>()),
 
+  /**
+   * Returns whether the OS keychain (Electron `safeStorage`) can encrypt /
+   * decrypt right now. Renderer queries this once at startup so it can show a
+   * banner when credentials cannot be stored securely (Wave 4.3 commit 7.2).
+   */
+  getKeychainStatus: oc.output(type<{ available: boolean }>()),
+
   getGlobalModelSelection: oc.output(type<{ providerId?: string; model?: string }>()),
 
   setGlobalModelSelection: oc

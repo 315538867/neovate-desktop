@@ -636,5 +636,8 @@
   "settings.plugins.examples": "示例：",
   "settings.plugins.addMarketplaceFailed": "添加市场失败",
   "settings.plugins.add": "添加",
-  "settings.plugins.adding": "添加中..."
+  "settings.plugins.adding": "添加中...",
+  "keychain.unavailable.title": "系统钥匙串不可用",
+  "keychain.unavailable.description": "无法在当前系统上加密或读取 Provider API Key。在钥匙串恢复可用前,所有保存请求都会失败。",
+  "keychain.unavailable.dismiss": "知道了"
 }

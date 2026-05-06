@@ -11,12 +11,17 @@ const log = debug("neovate:config");
 
 import { configContract } from "../../../shared/features/config/contract";
 import { writeModelSetting } from "../agent/claude-settings";
+import { isKeychainAvailable } from "./config-store";
 
 const os = implement({ config: configContract }).$context<AppContext>();
 
 export const configRouter = os.config.router({
   get: os.config.get.handler(({ context }) => {
     return context.configStore.getAll();
+  }),
+
+  getKeychainStatus: os.config.getKeychainStatus.handler(() => {
+    return { available: isKeychainAvailable() };
   }),
 
   getGlobalModelSelection: os.config.getGlobalModelSelection.handler(({ context }) => {

@@ -18,6 +18,7 @@ import { AgentChat, SessionList } from "./features/agent";
 import { OrchestratorPanel } from "./features/agent-orchestrator/components/orchestrator-panel";
 import { useOrchestratorStore } from "./features/agent-orchestrator/store";
 import { CommandPalette } from "./features/command-palette/command-palette";
+import { KeychainWarningBanner } from "./features/config/components/keychain-warning";
 import { useConfigStore } from "./features/config/store";
 import { ContentPanelRenderer } from "./features/content-panel/components/content-panel";
 import { useSettingsStore } from "./features/settings";
@@ -105,6 +106,7 @@ export default function App() {
       {showStats && !showOrchestrator && <StatsPage />}
       {showOrchestrator && <OrchestratorPanel />}
       <CommandPalette />
+      <KeychainWarningBanner />
     </>
   );
 }

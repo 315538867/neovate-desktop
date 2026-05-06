@@ -634,5 +634,8 @@
   "settings.plugins.examples": "Examples:",
   "settings.plugins.addMarketplaceFailed": "Failed to add marketplace",
   "settings.plugins.add": "Add",
-  "settings.plugins.adding": "Adding..."
+  "settings.plugins.adding": "Adding...",
+  "keychain.unavailable.title": "OS keychain unavailable",
+  "keychain.unavailable.description": "Provider API keys cannot be encrypted or read on this system. Save attempts will fail until your keychain becomes reachable.",
+  "keychain.unavailable.dismiss": "Dismiss"
 }

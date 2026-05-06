@@ -14,6 +14,12 @@ type KeybindingsConfig = Record<KeybindingAction, string>;
 
 interface ConfigState extends AppConfig {
   loaded: boolean;
+  /**
+   * Whether OS keychain (Electron `safeStorage`) can encrypt/decrypt right now.
+   * `null` until the first `load()` resolves. When `false` the renderer surfaces
+   * a global banner since credentials cannot be stored securely (Wave 4.3 commit 7.2).
+   */
+  keychainAvailable: boolean | null;
   load: () => Promise<void>;
   // Generic setter for any config field
   setConfig: <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => void;
@@ -68,14 +74,26 @@ export const useConfigStore = create<ConfigState>()(
   immer((set, get) => ({
     ...DEFAULT_CONFIG,
     loaded: false,
+    keychainAvailable: null,
 
     load: async () => {
       log("loading config");
-      const config = await client.config.get();
-      log("config loaded", config);
+      // Fetch config + keychain status in parallel — both are read-only.
+      // If `getKeychainStatus` itself throws (very unlikely; it just calls
+      // `safeStorage.isEncryptionAvailable()`), treat that as unavailable
+      // so the banner surfaces conservatively.
+      const [config, keychainStatus] = await Promise.all([
+        client.config.get(),
+        client.config.getKeychainStatus().catch((err) => {
+          log("getKeychainStatus failed: %O", err);
+          return { available: false };
+        }),
+      ]);
+      log("config loaded keychainAvailable=%s", keychainStatus.available);
       set((state) => {
         Object.assign(state, config);
         state.loaded = true;
+        state.keychainAvailable = keychainStatus.available;
       });
     },
 

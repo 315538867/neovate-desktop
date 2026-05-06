@@ -11,6 +11,7 @@ import {
   writeProviderSetting,
   readProviderModelSetting,
 } from "../agent/claude-settings";
+import { wrapKeychainError } from "../config/keychain-error";
 
 const log = debug("neovate:provider-router");
 
@@ -174,97 +175,116 @@ const os = implement({ provider: providerContract }).$context<AppContext>();
 
 export const providerRouter = os.provider.router({
   list: os.provider.list.handler(({ context }) => {
-    return context.configStore.getProviders();
+    try {
+      return context.configStore.getProviders();
+    } catch (err) {
+      wrapKeychainError(err);
+    }
   }),
 
   get: os.provider.get.handler(({ input, context }) => {
-    return context.configStore.getProvider(input.id) ?? null;
+    try {
+      return context.configStore.getProvider(input.id) ?? null;
+    } catch (err) {
+      wrapKeychainError(err);
+    }
   }),
 
   create: os.provider.create.handler(({ input, context }) => {
-    const existing = context.configStore.getProviders();
+    // Wrap the whole handler so a KeychainUnavailableError surfacing from
+    // either getProviders() or addProvider() lands as a typed ORPCError;
+    // ORPCError throws inside (BAD_REQUEST) propagate untouched.
+    try {
+      const existing = context.configStore.getProviders();
 
-    // Validate unique name
-    if (existing.some((p) => p.name === input.name)) {
-      throw new ORPCError("BAD_REQUEST", {
-        defined: true,
-        message: `Provider name "${input.name}" already exists`,
-      });
-    }
-
-    // Validate modelMap values reference keys in models
-    for (const [slot, modelId] of Object.entries(input.modelMap)) {
-      if (modelId && !(modelId in input.models)) {
+      // Validate unique name
+      if (existing.some((p) => p.name === input.name)) {
         throw new ORPCError("BAD_REQUEST", {
           defined: true,
-          message: `modelMap.${slot} references "${modelId}" which is not in models`,
+          message: `Provider name "${input.name}" already exists`,
         });
       }
+
+      // Validate modelMap values reference keys in models
+      for (const [slot, modelId] of Object.entries(input.modelMap)) {
+        if (modelId && !(modelId in input.models)) {
+          throw new ORPCError("BAD_REQUEST", {
+            defined: true,
+            message: `modelMap.${slot} references "${modelId}" which is not in models`,
+          });
+        }
+      }
+
+      // Derive ID from name: lowercase, replace non-alphanumeric with dash, dedupe
+      let id = input.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+      if (!id) id = "provider";
+      if (existing.some((p) => p.id === id)) {
+        let i = 2;
+        while (existing.some((p) => p.id === `${id}-${i}`)) i++;
+        id = `${id}-${i}`;
+      }
+
+      const provider = {
+        id,
+        name: input.name,
+        enabled: true,
+        baseURL: input.baseURL,
+        apiKey: input.apiKey,
+        models: input.models,
+        modelMap: input.modelMap,
+        envOverrides: input.envOverrides ?? {},
+        ...(input.builtInId ? { builtInId: input.builtInId } : {}),
+        ...(input.dismissedSyncModels ? { dismissedSyncModels: input.dismissedSyncModels } : {}),
+      };
+
+      context.configStore.addProvider(provider);
+      log("create: name=%s id=%s", provider.name, provider.id);
+      return provider;
+    } catch (err) {
+      wrapKeychainError(err);
     }
-
-    // Derive ID from name: lowercase, replace non-alphanumeric with dash, dedupe
-    let id = input.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "");
-    if (!id) id = "provider";
-    if (existing.some((p) => p.id === id)) {
-      let i = 2;
-      while (existing.some((p) => p.id === `${id}-${i}`)) i++;
-      id = `${id}-${i}`;
-    }
-
-    const provider = {
-      id,
-      name: input.name,
-      enabled: true,
-      baseURL: input.baseURL,
-      apiKey: input.apiKey,
-      models: input.models,
-      modelMap: input.modelMap,
-      envOverrides: input.envOverrides ?? {},
-      ...(input.builtInId ? { builtInId: input.builtInId } : {}),
-      ...(input.dismissedSyncModels ? { dismissedSyncModels: input.dismissedSyncModels } : {}),
-    };
-
-    context.configStore.addProvider(provider);
-    log("create: name=%s id=%s", provider.name, provider.id);
-    return provider;
   }),
 
   update: os.provider.update.handler(({ input, context }) => {
-    const { id, ...updates } = input;
-    const current = context.configStore.getProvider(id);
-    if (!current) {
-      throw new ORPCError("NOT_FOUND", { defined: true, message: `Provider not found: ${id}` });
-    }
-
-    // Validate unique name
-    if (updates.name && updates.name !== current.name) {
-      const existing = context.configStore.getProviders();
-      if (existing.some((p) => p.name === updates.name && p.id !== id)) {
-        throw new ORPCError("BAD_REQUEST", {
-          defined: true,
-          message: `Provider name "${updates.name}" already exists`,
-        });
+    try {
+      const { id, ...updates } = input;
+      const current = context.configStore.getProvider(id);
+      if (!current) {
+        throw new ORPCError("NOT_FOUND", { defined: true, message: `Provider not found: ${id}` });
       }
-    }
 
-    // Validate modelMap references
-    const models = updates.models ?? current.models;
-    const modelMap = updates.modelMap ?? current.modelMap;
-    for (const [slot, modelId] of Object.entries(modelMap)) {
-      if (modelId && !(modelId in models)) {
-        throw new ORPCError("BAD_REQUEST", {
-          defined: true,
-          message: `modelMap.${slot} references "${modelId}" which is not in models`,
-        });
+      // Validate unique name
+      if (updates.name && updates.name !== current.name) {
+        const existing = context.configStore.getProviders();
+        if (existing.some((p) => p.name === updates.name && p.id !== id)) {
+          throw new ORPCError("BAD_REQUEST", {
+            defined: true,
+            message: `Provider name "${updates.name}" already exists`,
+          });
+        }
       }
-    }
 
-    const updated = context.configStore.updateProvider(id, updates);
-    log("update: id=%s name=%s", id, updated.name);
-    return updated;
+      // Validate modelMap references
+      const models = updates.models ?? current.models;
+      const modelMap = updates.modelMap ?? current.modelMap;
+      for (const [slot, modelId] of Object.entries(modelMap)) {
+        if (modelId && !(modelId in models)) {
+          throw new ORPCError("BAD_REQUEST", {
+            defined: true,
+            message: `modelMap.${slot} references "${modelId}" which is not in models`,
+          });
+        }
+      }
+
+      const updated = context.configStore.updateProvider(id, updates);
+      log("update: id=%s name=%s", id, updated.name);
+      return updated;
+    } catch (err) {
+      wrapKeychainError(err);
+    }
   }),
 
   remove: os.provider.remove.handler(({ input, context }) => {
@@ -285,61 +305,65 @@ export const providerRouter = os.provider.router({
   }),
 
   setSelection: os.provider.setSelection.handler(async ({ input, context }) => {
-    const { sessionId, providerId, model, scope } = input;
-    const cwd = context.sessionManager.getSessionCwd(sessionId);
-    log(
-      "setSelection: sessionId=%s providerId=%s model=%s scope=%s",
-      sessionId,
-      providerId,
-      model,
-      scope,
-    );
-
-    // Write provider setting
-    await writeProviderSetting(
-      scope,
-      providerId,
-      { sessionId, cwd },
-      context.configStore,
-      context.projectStore,
-    );
-
-    // Write model to provider config (not .claude/ — those are for SDK Default)
-    if (model !== undefined && model !== null) {
-      if (scope === "project") {
-        context.projectStore.setProjectSelection(cwd, undefined, model);
-      } else if (scope === "global") {
-        context.configStore.setGlobalSelection(undefined, model);
-      }
-    }
-
-    // Re-read effective values
-    const effectiveProvider = await readProviderSetting(
-      sessionId,
-      cwd,
-      context.configStore,
-      context.projectStore,
-    );
-    let effectiveModel:
-      | { model: string; scope: import("../../../shared/features/agent/types").ModelScope }
-      | undefined;
-
-    if (effectiveProvider) {
-      const pm = await readProviderModelSetting(
+    try {
+      const { sessionId, providerId, model, scope } = input;
+      const cwd = context.sessionManager.getSessionCwd(sessionId);
+      log(
+        "setSelection: sessionId=%s providerId=%s model=%s scope=%s",
         sessionId,
-        cwd,
-        effectiveProvider.provider,
+        providerId,
+        model,
+        scope,
+      );
+
+      // Write provider setting
+      await writeProviderSetting(
+        scope,
+        providerId,
+        { sessionId, cwd },
         context.configStore,
         context.projectStore,
       );
-      effectiveModel = pm;
-    }
 
-    return {
-      providerId: effectiveProvider?.provider.id,
-      model: effectiveModel?.model,
-      providerScope: effectiveProvider?.scope,
-      modelScope: effectiveModel?.scope,
-    };
+      // Write model to provider config (not .claude/ — those are for SDK Default)
+      if (model !== undefined && model !== null) {
+        if (scope === "project") {
+          context.projectStore.setProjectSelection(cwd, undefined, model);
+        } else if (scope === "global") {
+          context.configStore.setGlobalSelection(undefined, model);
+        }
+      }
+
+      // Re-read effective values
+      const effectiveProvider = await readProviderSetting(
+        sessionId,
+        cwd,
+        context.configStore,
+        context.projectStore,
+      );
+      let effectiveModel:
+        | { model: string; scope: import("../../../shared/features/agent/types").ModelScope }
+        | undefined;
+
+      if (effectiveProvider) {
+        const pm = await readProviderModelSetting(
+          sessionId,
+          cwd,
+          effectiveProvider.provider,
+          context.configStore,
+          context.projectStore,
+        );
+        effectiveModel = pm;
+      }
+
+      return {
+        providerId: effectiveProvider?.provider.id,
+        model: effectiveModel?.model,
+        providerScope: effectiveProvider?.scope,
+        modelScope: effectiveModel?.scope,
+      };
+    } catch (err) {
+      wrapKeychainError(err);
+    }
   }),
 });

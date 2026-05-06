@@ -218,7 +218,15 @@ app.whenReady().then(async () => {
   startupLog("app.whenReady fired %s", elapsed());
   electronApp.setAppUserModelId("com.neovateai.desktop");
 
-  configStore.migrateApiKeys();
+  // safeStorage may be unavailable (Linux without keychain, headless tests, etc).
+  // Don't crash startup — the renderer surfaces a banner via
+  // `client.config.getKeychainStatus()` so the user sees what's wrong, and
+  // any encrypt/decrypt op will throw KeychainUnavailableError when reached.
+  try {
+    configStore.migrateApiKeys();
+  } catch (err) {
+    log("migrateApiKeys skipped: %O", err);
+  }
 
   await mainApp.start();
   startupLog("mainApp.start done %s", elapsed());

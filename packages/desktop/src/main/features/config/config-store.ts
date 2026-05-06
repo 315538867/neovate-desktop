@@ -9,6 +9,29 @@ import { APP_DATA_DIR } from "../../core/app-paths";
 
 const log = debug("neovate:config-store");
 
+/**
+ * Thrown when encrypt/decrypt is requested but the OS keychain is offline.
+ * Surfaced to the renderer as an ORPCError so the user sees a banner instead
+ * of an opaque "no API key" failure later (Wave 4.3 commit 7.2).
+ *
+ * Hard-fail (instead of silently degrading apiKey to "") because storing or
+ * reading credentials when encryption isn't available means the app can no
+ * longer hold the user's keys safely — and quietly continuing led to provider
+ * calls failing with confusing "missing API key" errors.
+ */
+export class KeychainUnavailableError extends Error {
+  readonly code = "KEYCHAIN_UNAVAILABLE";
+  constructor(message = "OS keychain is not available; cannot store credentials securely") {
+    super(message);
+    this.name = "KeychainUnavailableError";
+  }
+}
+
+/** Returns true iff Electron's safeStorage can encrypt/decrypt right now. */
+export function isKeychainAvailable(): boolean {
+  return safeStorage.isEncryptionAvailable();
+}
+
 /** On-disk shape — apiKey is replaced by encryptedApiKey after migration. */
 type StoredProvider = Omit<Provider, "apiKey"> & {
   apiKey?: string;
@@ -22,8 +45,12 @@ type ConfigStoreSchema = AppConfig & {
 };
 
 function encryptApiKey(provider: Provider): StoredProvider {
-  if (!provider.apiKey || !safeStorage.isEncryptionAvailable()) {
+  if (!provider.apiKey) {
+    // No secret to protect — pass through unchanged.
     return provider;
+  }
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new KeychainUnavailableError();
   }
   const { apiKey, ...rest } = provider;
   return {
@@ -35,17 +62,21 @@ function encryptApiKey(provider: Provider): StoredProvider {
 function decryptApiKey(stored: StoredProvider): Provider {
   if (typeof stored.encryptedApiKey === "string") {
     const { encryptedApiKey, ...rest } = stored;
-    if (safeStorage.isEncryptionAvailable()) {
-      try {
-        return {
-          ...rest,
-          apiKey: safeStorage.decryptString(Buffer.from(encryptedApiKey, "base64")),
-        } as Provider;
-      } catch {
-        log("failed to decrypt apiKey for provider %s", stored.id);
-      }
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new KeychainUnavailableError();
     }
-    return { ...rest, apiKey: "" } as Provider;
+    try {
+      return {
+        ...rest,
+        apiKey: safeStorage.decryptString(Buffer.from(encryptedApiKey, "base64")),
+      } as Provider;
+    } catch (err) {
+      // Corrupted ciphertext is a different failure mode — log + degrade so
+      // one bad row doesn't take out the whole provider list. The user can
+      // re-enter the key from the provider settings UI.
+      log("failed to decrypt apiKey for provider %s: %O", stored.id, err);
+      return { ...rest, apiKey: "" } as Provider;
+    }
   }
   // Legacy plaintext — apiKey already present (or empty)
   return stored as unknown as Provider;
@@ -161,13 +192,30 @@ export class ConfigStore {
     return this.store.get("providers") ?? [];
   }
 
-  /** Encrypt plaintext apiKey fields left over from before encryption was added. Must be called after app.whenReady(). */
+  /**
+   * Encrypt plaintext apiKey fields left over from before encryption was added.
+   * Must be called after app.whenReady().
+   *
+   * Throws {@link KeychainUnavailableError} if any plaintext apiKey is on disk
+   * AND the keychain is unavailable — leaving plaintext credentials sitting in
+   * the JSON store when encryption later becomes available again would be a
+   * silent regression. The caller (main/index.ts) wraps this in try/catch and
+   * surfaces a startup banner instead of crashing the whole process.
+   *
+   * No-op (does not throw) when there are no plaintext apiKeys to migrate,
+   * regardless of keychain status.
+   */
   migrateApiKeys(): void {
-    if (!safeStorage.isEncryptionAvailable()) {
-      log("migrateApiKeys: encryption not available, skipping");
-      return;
-    }
     const raw = this.getRawProviders();
+    const pending = raw.filter((p) => p.apiKey && !p.encryptedApiKey);
+    if (pending.length === 0) return;
+
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new KeychainUnavailableError(
+        `Cannot migrate ${pending.length} plaintext apiKey(s) — OS keychain is not available`,
+      );
+    }
+
     let migrated = 0;
     for (let i = 0; i < raw.length; i++) {
       if (raw[i].apiKey && !raw[i].encryptedApiKey) {
