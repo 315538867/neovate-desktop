@@ -1,10 +1,10 @@
-import { implement } from "@orpc/server";
-
-import type { AppContext } from "../../router";
-
 import { storageContract } from "../../../shared/features/storage/contract";
+import { defineRouter } from "../../core/router-factory";
 
-const os = implement({ storage: storageContract }).$context<AppContext>();
+const { os } = defineRouter({
+  contract: { storage: storageContract },
+  debugNs: "neovate:storage",
+});
 
 export const storageRouter = os.storage.router({
   get: os.storage.get.handler(({ input, context }) => {

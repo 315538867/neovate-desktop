@@ -1,10 +1,10 @@
-import { implement } from "@orpc/server";
-
-import type { AppContext } from "../../router";
-
 import { deeplinkContract } from "../../../shared/features/deeplink/contract";
+import { defineRouter } from "../../core/router-factory";
 
-const os = implement({ deeplink: deeplinkContract }).$context<AppContext>();
+const { os } = defineRouter({
+  contract: { deeplink: deeplinkContract },
+  debugNs: "neovate:deeplink",
+});
 
 export const deeplinkRouter = os.deeplink.router({
   subscribe: os.deeplink.subscribe.handler(async function* ({ context, signal }) {

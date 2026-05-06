@@ -1,14 +1,12 @@
-import { implement } from "@orpc/server";
-import debug from "debug";
 import { BrowserWindow, dialog } from "electron";
 
-import type { AppContext } from "../../router";
-
 import { electronContract } from "../../../shared/features/electron/contract";
+import { defineRouter } from "../../core/router-factory";
 
-const log = debug("neovate:electron");
-
-const os = implement({ electron: electronContract }).$context<AppContext>();
+const { os, log } = defineRouter({
+  contract: { electron: electronContract },
+  debugNs: "neovate:electron",
+});
 
 export const electronRouter = os.electron.router({
   dialog: os.electron.dialog.router({
