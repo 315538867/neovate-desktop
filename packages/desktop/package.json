@@ -23,6 +23,7 @@
     "build:mac:dev": "bun run build && BUILD_ENV=dev electron-builder --mac --config configs/electron-builder.mjs",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:e2e": "bun run build && playwright test",
     "perf": "bun scripts/perf-benchmark.ts",
     "perf:check": "bun scripts/perf-benchmark.ts -- --check"
@@ -87,6 +88,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "@vitest/coverage-v8": "^4.1.5",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-search": "^0.16.0",
     "@xterm/addon-unicode11": "^0.9.0",
