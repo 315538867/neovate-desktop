@@ -62,27 +62,28 @@ class Subscription {
   }
 
   iterator(): AsyncIterableIterator<TraceEvent> {
-    const sub = this;
+    const next = (): Promise<IteratorResult<TraceEvent>> => {
+      if (this.buffer.length > 0) {
+        const value = this.buffer.shift() as TraceEvent;
+        return Promise.resolve({ value, done: false });
+      }
+      if (this.closed) {
+        return Promise.resolve({ value: undefined, done: true });
+      }
+      return new Promise((resolve) => {
+        this.resolveNext = resolve;
+      });
+    };
+    const ret = (): Promise<IteratorResult<TraceEvent>> => {
+      this.close();
+      return Promise.resolve({ value: undefined, done: true });
+    };
     const iter: AsyncIterableIterator<TraceEvent> = {
       [Symbol.asyncIterator]() {
         return iter;
       },
-      next: (): Promise<IteratorResult<TraceEvent>> => {
-        if (sub.buffer.length > 0) {
-          const value = sub.buffer.shift() as TraceEvent;
-          return Promise.resolve({ value, done: false });
-        }
-        if (sub.closed) {
-          return Promise.resolve({ value: undefined, done: true });
-        }
-        return new Promise((resolve) => {
-          sub.resolveNext = resolve;
-        });
-      },
-      return: (): Promise<IteratorResult<TraceEvent>> => {
-        sub.close();
-        return Promise.resolve({ value: undefined, done: true });
-      },
+      next,
+      return: ret,
     };
     return iter;
   }

@@ -27,7 +27,7 @@ export function useSessionLifecycleSubscription(cwd: string) {
     (async () => {
       while (!cancelled) {
         try {
-          iter = await client.agent.subscribeSessionLifecycle();
+          iter = await client.agent.session.subscribeSessionLifecycle();
           for await (const event of iter) {
             if (cancelled) break;
             log("event: type=%s sessionId=%s", event.type, event.session.sessionId);
@@ -42,7 +42,7 @@ export function useSessionLifecycleSubscription(cwd: string) {
           // Subscription dropped — reconcile by re-fetching full list
           log("subscription dropped, re-fetching sessions");
           try {
-            const sessions = await client.agent.listSessions({ cwd });
+            const sessions = await client.agent.session.listSessions({ cwd });
             setAgentSessions(sessions);
           } catch {
             // Ignore fetch errors during reconnect

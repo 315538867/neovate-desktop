@@ -158,7 +158,7 @@ export function AgentChat() {
     // In single-project mode, fetch only for the active project
     const listArgs = multiProjectSupport ? {} : { cwd: activeProjectPath };
     chatLog("effect[project-switch]: listing sessions args=%o", listArgs);
-    client.agent
+    client.agent.session
       .listSessions(listArgs)
       .then((sessions) => {
         chatLog("effect[project-switch]: listSessions returned total=%d", sessions.length);

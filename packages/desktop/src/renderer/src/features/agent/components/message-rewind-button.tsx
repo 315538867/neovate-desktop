@@ -42,7 +42,7 @@ function archiveOriginalSession(
   },
 ) {
   import("../../../orpc").then(({ client }) => {
-    client.agent.archiveSessionFile({ sessionId, ...meta }).catch(() => {});
+    client.agent.session.archiveSessionFile({ sessionId, ...meta }).catch(() => {});
   });
 }
 
@@ -69,7 +69,7 @@ export function MessageRewindButton({ sessionId, messageId, disabled }: Props) {
     setDryRunLoading(true);
     try {
       const { client } = await import("../../../orpc");
-      const result = await client.agent.rewindFilesDryRun({ sessionId, messageId });
+      const result = await client.agent.session.rewindFilesDryRun({ sessionId, messageId });
       dryRunCache.set(cacheKey, result);
       setDryRun(result);
     } catch (error) {

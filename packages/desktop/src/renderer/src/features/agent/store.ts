@@ -292,7 +292,7 @@ export const useAgentStore = create<AgentState>()(
         );
       });
       if (createdAt) {
-        client.agent.updateSessionStartTime({ sessionId, createdAt }).catch(() => {});
+        client.agent.session.updateSessionStartTime({ sessionId, createdAt }).catch(() => {});
       }
     },
 
@@ -406,7 +406,7 @@ export const useAgentStore = create<AgentState>()(
 
     renameSession: async (sessionId, title) => {
       storeLog("renameSession: sid=%s title=%s", sessionId, title);
-      await client.agent.renameSession({ sessionId, title });
+      await client.agent.session.renameSession({ sessionId, title });
       set((state) => {
         const session = state.sessions.get(sessionId);
         if (session) session.title = title;

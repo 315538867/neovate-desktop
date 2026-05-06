@@ -11,9 +11,11 @@ import type {
   ClaudeCodeUIMessage,
 } from "../../../../shared/claude-code/types";
 
-import { agentContract } from "../../../../shared/features/agent/contract";
+import { sessionContract } from "../../../../shared/features/agent/contract";
 
-type AgentRpc = ContractRouterClient<{ agent: typeof agentContract }>["agent"];
+type AgentRpc = ContractRouterClient<{
+  agent: { session: typeof sessionContract };
+}>["agent"]["session"];
 
 export class ClaudeCodeChatTransport implements ChatTransport<ClaudeCodeUIMessage> {
   constructor(private readonly rpc: AgentRpc) {}

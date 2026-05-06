@@ -125,7 +125,7 @@ export function PermissionDialog({ sessionId }: Props) {
     });
 
     // 4. Save plan to disk
-    client.agent.savePlan({ sessionId, plan: input.plan! }).catch(() => {});
+    client.agent.session.savePlan({ sessionId, plan: input.plan! }).catch(() => {});
 
     // 5. If clear context, register pending action
     if (choice.clearContext) {
