@@ -412,6 +412,7 @@
 
   "user.menu": "User menu",
   "user.usageStats": "Usage Statistics",
+  "user.orchestrator": "Pipelines",
   "user.settings": "Settings",
 
   "stats.title": "Usage Statistics",

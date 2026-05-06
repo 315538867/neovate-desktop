@@ -15,6 +15,8 @@ import {
 } from "./components/app-layout";
 import { FullRightPanel } from "./components/app-layout/full-right-panel";
 import { AgentChat, SessionList } from "./features/agent";
+import { OrchestratorPanel } from "./features/agent-orchestrator/components/orchestrator-panel";
+import { useOrchestratorStore } from "./features/agent-orchestrator/store";
 import { CommandPalette } from "./features/command-palette/command-palette";
 import { useConfigStore } from "./features/config/store";
 import { ContentPanelRenderer } from "./features/content-panel/components/content-panel";
@@ -33,6 +35,7 @@ export default function App() {
   useCrossWindowSync();
   const showSettings = useSettingsStore((state) => state.showSettings);
   const showStats = useStatsStore((state) => state.showStats);
+  const showOrchestrator = useOrchestratorStore((state) => state.showOrchestrator);
   const developerMode = useConfigStore((s) => s.developerMode);
 
   // TODO: refactor with 统一的埋点体系, replace raw CustomEvent dispatching
@@ -65,7 +68,7 @@ export default function App() {
   return (
     <>
       <AppLayoutRoot>
-        {!showSettings && !showStats && <AppLayoutTrafficLights />}
+        {!showSettings && !showStats && !showOrchestrator && <AppLayoutTrafficLights />}
 
         <AppLayoutPrimarySidebar>
           <div className="flex h-full flex-col">
@@ -98,8 +101,9 @@ export default function App() {
         <UpdaterToast />
       </AppLayoutRoot>
 
-      {showSettings && !showStats && <SettingsPage />}
-      {showStats && <StatsPage />}
+      {showSettings && !showStats && !showOrchestrator && <SettingsPage />}
+      {showStats && !showOrchestrator && <StatsPage />}
+      {showOrchestrator && <OrchestratorPanel />}
       <CommandPalette />
     </>
   );

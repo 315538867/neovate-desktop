@@ -414,6 +414,7 @@
 
   "user.menu": "用户菜单",
   "user.usageStats": "用量统计",
+  "user.orchestrator": "编排管线",
   "user.settings": "设置",
 
   "stats.title": "用量统计",

@@ -1,8 +1,9 @@
 import { Settings03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ChartColumnBig, User } from "lucide-react";
+import { ChartColumnBig, User, Workflow } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { useOrchestratorStore } from "../../features/agent-orchestrator/store";
 import { useSettingsStore } from "../../features/settings";
 import { useStatsStore } from "../../plugins/stats/store";
 import { Button } from "../ui/button";
@@ -12,6 +13,7 @@ export function UserMenu() {
   const { t } = useTranslation();
   const setShowSettings = useSettingsStore((s) => s.setShowSettings);
   const setShowStats = useStatsStore((s) => s.setShowStats);
+  const setShowOrchestrator = useOrchestratorStore((s) => s.setShowOrchestrator);
 
   return (
     <Menu>
@@ -32,6 +34,11 @@ export function UserMenu() {
         <MenuItem onClick={() => setShowStats(true)}>
           <ChartColumnBig size={14} strokeWidth={1.5} className="opacity-60" />
           <span>{t("user.usageStats")}</span>
+        </MenuItem>
+
+        <MenuItem onClick={() => setShowOrchestrator(true)}>
+          <Workflow size={14} strokeWidth={1.5} className="opacity-60" />
+          <span>{t("user.orchestrator")}</span>
         </MenuItem>
 
         <MenuSeparator />
