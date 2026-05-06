@@ -4,7 +4,15 @@ import { ArrowDown01Icon, ArrowUp01Icon, Copy01Icon, Tick01Icon } from "@hugeico
 import { HugeiconsIcon } from "@hugeicons/react";
 import debug from "debug";
 import { XIcon } from "lucide-react";
-import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type RefObject,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -422,6 +430,13 @@ function ConversationView({
   const streamingMessage = useChatStreamingMessage(sessionId);
   const isStreamingActive = status === "streaming" || status === "submitted";
 
+  // useDeferredValue lets React fall behind on streaming-bubble updates when
+  // the main thread is busy (typing, scrolling, heavy markdown rendering).
+  // The streaming slot is "best-effort recent" — falling 1-2 frames behind
+  // is invisible to the user but keeps interactions responsive. The stable
+  // list is unaffected (separate subscription, separate memo).
+  const deferredStreamingMessage = useDeferredValue(streamingMessage);
+
   const stableItems = useMemo(
     () =>
       stableMessages.map((message) => (
@@ -439,17 +454,17 @@ function ConversationView({
 
   const streamingItem = useMemo(
     () =>
-      streamingMessage ? (
+      deferredStreamingMessage ? (
         <MessageParts
-          key={streamingMessage.id}
-          message={streamingMessage}
+          key={deferredStreamingMessage.id}
+          message={deferredStreamingMessage}
           isComplete={false}
           renderToolPart={renderToolPart}
           sessionId={sessionId}
           isStreaming
         />
       ) : null,
-    [streamingMessage, sessionId],
+    [deferredStreamingMessage, sessionId],
   );
 
   const items = useMemo(
