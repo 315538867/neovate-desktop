@@ -81,9 +81,9 @@ export class BrowserWindowManager implements IBrowserWindowManager {
       ...(process.platform === "linux" ? { icon } : {}),
       webPreferences: {
         preload: join(__dirname, "../preload/index.js"),
-        // sandbox stays false: preload imports node:os (homedir) and we
-        // intentionally use Node APIs in the bridge.
-        sandbox: false,
+        // Sandboxed renderer: preload uses ipcRenderer.sendSync("app:get-homedir")
+        // instead of importing `node:os`, so it stays compatible.
+        sandbox: true,
         // Explicitly enforce the secure renderer defaults Electron now ships
         // with, so a future Electron upgrade or an embedded preset cannot
         // silently weaken them.
@@ -278,7 +278,7 @@ export class BrowserWindowManager implements IBrowserWindowManager {
       ...(parent && this.#mainWindow ? { parent: this.#mainWindow } : {}),
       webPreferences: {
         preload: join(__dirname, "../preload/index.js"),
-        sandbox: false,
+        sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
         webviewTag: true,

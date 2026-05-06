@@ -3,6 +3,7 @@ import { electronApp, is } from "@electron-toolkit/utils";
 import { RPCHandler } from "@orpc/server/message-port";
 import debug from "debug";
 import { app, ipcMain, BrowserWindow } from "electron";
+import { homedir } from "node:os";
 
 import type { AppContext } from "./router";
 
@@ -175,6 +176,13 @@ app.whenReady().then(async () => {
     log("start-orpc-server received, upgrading message port");
     handler.upgrade(serverPort, { context: appContext });
     serverPort.start();
+  });
+
+  // Sync homedir lookup for sandboxed preload (cannot import node:os).
+  // Called once per renderer at preload load — sub-millisecond cost.
+  ipcMain.removeAllListeners("app:get-homedir");
+  ipcMain.on("app:get-homedir", (event) => {
+    event.returnValue = homedir();
   });
 
   app.on("activate", () => {

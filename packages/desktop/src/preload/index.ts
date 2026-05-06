@@ -1,7 +1,6 @@
 import { electronAPI } from "@electron-toolkit/preload";
 import debug from "debug";
 import { contextBridge, ipcRenderer } from "electron";
-import { homedir } from "node:os";
 
 const log = debug("neovate:orpc:preload");
 
@@ -48,7 +47,9 @@ window.addEventListener("message", (event) => {
 
 // API for renderer process (menu commands, etc.)
 const api = {
-  homedir: homedir(),
+  // homedir is fetched synchronously from main once per renderer init.
+  // sandbox=true forbids `node:os` in preload, so we round-trip via IPC.
+  homedir: ipcRenderer.sendSync("app:get-homedir") as string,
   isDev: !!process.defaultApp,
   onOpenSettings: (callback: () => void) => {
     ipcRenderer.on("menu:open-settings", callback);
