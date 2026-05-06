@@ -21,8 +21,21 @@ export function safeExtractZip(zip: AdmZip, destDir: string): void {
   const root = path.resolve(destDir) + path.sep;
 
   for (const entry of zip.getEntries()) {
+    // Reject absolute paths and Windows-style traversal regardless of host
+    // platform. On POSIX, `path.resolve` treats `\\` as a regular filename
+    // character, so a Windows-crafted entry like `..\\..\\foo` would slip past
+    // a naive resolve check. Normalising both separators to `/` for the
+    // detection step makes the policy platform-independent.
+    const normalised = entry.entryName.replace(/\\/g, "/");
+    const traversesUp = normalised.split("/").includes("..");
+    const isAbsolute = path.posix.isAbsolute(normalised) || /^[a-zA-Z]:[/\\]/.test(entry.entryName);
     const target = path.resolve(destDir, entry.entryName);
-    if (target !== path.resolve(destDir) && !target.startsWith(root)) {
+
+    if (
+      isAbsolute ||
+      traversesUp ||
+      (target !== path.resolve(destDir) && !target.startsWith(root))
+    ) {
       throw new Error(`Refusing to extract zip entry outside target directory: ${entry.entryName}`);
     }
 

@@ -3,6 +3,8 @@ import debug from "debug";
 import fs from "node:fs";
 import path from "node:path";
 
+import { safeExtractZip } from "../../../features/skills/installers/zip-extract";
+
 const log = debug("neovate:editor:installer");
 import { ensureExtension } from "./extension-path";
 
@@ -52,7 +54,9 @@ async function extractVsix(vsixPath: string, targetDir: string): Promise<void> {
       const tempExtractDir = path.join(targetDir, "_temp_extract");
       fs.mkdirSync(tempExtractDir, { recursive: true });
 
-      zip.extractAllTo(tempExtractDir, true);
+      // safeExtractZip rejects entries whose resolved path escapes tempExtractDir
+      // (zip-slip). adm-zip's built-in extractAllTo does NOT validate this.
+      safeExtractZip(zip, tempExtractDir);
 
       const extensionDir = path.join(tempExtractDir, "extension");
       if (fs.existsSync(extensionDir)) {
@@ -64,7 +68,7 @@ async function extractVsix(vsixPath: string, targetDir: string): Promise<void> {
 
       fs.rmSync(tempExtractDir, { recursive: true, force: true });
     } else {
-      zip.extractAllTo(targetDir, true);
+      safeExtractZip(zip, targetDir);
     }
   } catch (error) {
     console.error("[extractVsix] extraction failed:", error);
