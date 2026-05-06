@@ -5,20 +5,20 @@ import { join } from "node:path";
 
 import type { AppContext } from "../../router";
 
-import { agentContract } from "../../../shared/features/agent/contract";
+import { sessionContract } from "../../../shared/features/agent/contract";
 import { APP_DATA_DIR } from "../../core/app-paths";
 import { readModelSetting, writeModelSetting } from "./claude-settings";
 
 const agentLog = debug("neovate:agent-router");
 
-const os = implement({ agent: agentContract }).$context<AppContext>();
+const os = implement({ session: sessionContract }).$context<AppContext>();
 
-export const agentRouter = os.agent.router({
-  activeSessions: os.agent.activeSessions.handler(({ context }) => {
+export const sessionRouter = os.session.router({
+  activeSessions: os.session.activeSessions.handler(({ context }) => {
     return context.sessionManager.getActiveSessions();
   }),
 
-  subscribeSessionLifecycle: os.agent.subscribeSessionLifecycle.handler(async function* ({
+  subscribeSessionLifecycle: os.session.subscribeSessionLifecycle.handler(async function* ({
     context,
     signal,
   }) {
@@ -50,7 +50,7 @@ export const agentRouter = os.agent.router({
     }
   }),
 
-  listSessions: os.agent.listSessions.handler(async ({ input, context }) => {
+  listSessions: os.session.listSessions.handler(async ({ input, context }) => {
     const sessions = await context.sessionManager.listSessions(input.cwd);
     const startTimes = context.projectStore.getSessionStartTimes();
     for (const s of sessions) {
@@ -60,17 +60,17 @@ export const agentRouter = os.agent.router({
     return sessions;
   }),
 
-  renameSession: os.agent.renameSession.handler(async ({ input, context }) => {
+  renameSession: os.session.renameSession.handler(async ({ input, context }) => {
     agentLog("renameSession: sessionId=%s title=%s", input.sessionId, input.title);
     await context.sessionManager.renameSession(input.sessionId, input.title);
   }),
 
-  updateSessionStartTime: os.agent.updateSessionStartTime.handler(({ input, context }) => {
+  updateSessionStartTime: os.session.updateSessionStartTime.handler(({ input, context }) => {
     context.projectStore.setSessionStartTime(input.sessionId, input.createdAt);
   }),
 
-  claudeCode: os.agent.claudeCode.router({
-    createSession: os.agent.claudeCode.createSession.handler(async ({ input, context }) => {
+  claudeCode: os.session.claudeCode.router({
+    createSession: os.session.claudeCode.createSession.handler(async ({ input, context }) => {
       agentLog(
         "claudeCode.createSession: cwd=%s model=%s providerId=%s",
         input.cwd,
@@ -85,11 +85,15 @@ export const agentRouter = os.agent.router({
       }
     }),
 
-    send: os.agent.claudeCode.send.handler(async ({ input, context }) => {
+    send: os.session.claudeCode.send.handler(async ({ input, context }) => {
       await context.sessionManager.send(input.sessionId, input.message);
     }),
 
-    subscribe: os.agent.claudeCode.subscribe.handler(async function* ({ input, context, signal }) {
+    subscribe: os.session.claudeCode.subscribe.handler(async function* ({
+      input,
+      context,
+      signal,
+    }) {
       for await (const event of context.sessionManager.eventPublisher.subscribe(input.sessionId, {
         signal,
       })) {
@@ -97,16 +101,16 @@ export const agentRouter = os.agent.router({
       }
     }),
 
-    closeSession: os.agent.claudeCode.closeSession.handler(async ({ input, context }) => {
+    closeSession: os.session.claudeCode.closeSession.handler(async ({ input, context }) => {
       agentLog("claudeCode.closeSession: sessionId=%s", input.sessionId);
       await context.sessionManager.closeSession(input.sessionId);
     }),
 
-    dispatch: os.agent.claudeCode.dispatch.handler(({ input, context }) => {
+    dispatch: os.session.claudeCode.dispatch.handler(({ input, context }) => {
       return context.sessionManager.handleDispatch(input.sessionId, input.dispatch);
     }),
 
-    loadSession: os.agent.claudeCode.loadSession.handler(async ({ input, context }) => {
+    loadSession: os.session.claudeCode.loadSession.handler(async ({ input, context }) => {
       agentLog("claudeCode.loadSession: sessionId=%s cwd=%s", input.sessionId, input.cwd);
       try {
         return await context.sessionManager.loadSession(input.sessionId, input.cwd);
@@ -118,24 +122,24 @@ export const agentRouter = os.agent.router({
     }),
   }),
 
-  network: os.agent.network.router({
-    listRequests: os.agent.network.listRequests.handler(({ input, context }) => {
+  network: os.session.network.router({
+    listRequests: os.session.network.listRequests.handler(({ input, context }) => {
       return context.requestTracker.getRequests(input.sessionId);
     }),
 
-    getRequestDetail: os.agent.network.getRequestDetail.handler(({ input, context }) => {
+    getRequestDetail: os.session.network.getRequestDetail.handler(({ input, context }) => {
       return context.requestTracker.getRequestDetail(input.sessionId, input.requestId);
     }),
 
-    getInspectorState: os.agent.network.getInspectorState.handler(({ input, context }) => {
+    getInspectorState: os.session.network.getInspectorState.handler(({ input, context }) => {
       return context.requestTracker.getInspectorState(input.sessionId);
     }),
 
-    clearRequests: os.agent.network.clearRequests.handler(({ input, context }) => {
+    clearRequests: os.session.network.clearRequests.handler(({ input, context }) => {
       context.requestTracker.clearRequests(input.sessionId);
     }),
 
-    subscribe: os.agent.network.subscribe.handler(async function* ({ input, context, signal }) {
+    subscribe: os.session.network.subscribe.handler(async function* ({ input, context, signal }) {
       for await (const summary of context.requestTracker.eventPublisher.subscribe(input.sessionId, {
         signal,
       })) {
@@ -144,16 +148,16 @@ export const agentRouter = os.agent.router({
     }),
   }),
 
-  forkSession: os.agent.forkSession.handler(async ({ input, context }) => {
+  forkSession: os.session.forkSession.handler(async ({ input, context }) => {
     agentLog("forkSession: sessionId=%s cwd=%s", input.sessionId, input.cwd);
     return context.sessionManager.forkSession(input.sessionId, input.cwd, input.title);
   }),
 
-  rewindFilesDryRun: os.agent.rewindFilesDryRun.handler(async ({ input, context }) => {
+  rewindFilesDryRun: os.session.rewindFilesDryRun.handler(async ({ input, context }) => {
     return context.sessionManager.rewindFilesDryRun(input.sessionId, input.messageId);
   }),
 
-  rewindToMessage: os.agent.rewindToMessage.handler(async ({ input, context }) => {
+  rewindToMessage: os.session.rewindToMessage.handler(async ({ input, context }) => {
     agentLog(
       "rewindToMessage: sessionId=%s messageId=%s restoreFiles=%s",
       input.sessionId,
@@ -168,12 +172,12 @@ export const agentRouter = os.agent.router({
     );
   }),
 
-  deleteSessionFile: os.agent.deleteSessionFile.handler(async ({ input, context }) => {
+  deleteSessionFile: os.session.deleteSessionFile.handler(async ({ input, context }) => {
     agentLog("deleteSessionFile: sessionId=%s", input.sessionId);
     await context.sessionManager.deleteSessionFile(input.sessionId);
   }),
 
-  archiveSessionFile: os.agent.archiveSessionFile.handler(async ({ input, context }) => {
+  archiveSessionFile: os.session.archiveSessionFile.handler(async ({ input, context }) => {
     agentLog("archiveSessionFile: sessionId=%s", input.sessionId);
     await context.sessionManager.archiveSessionFile(input.sessionId, {
       forkedSessionId: input.forkedSessionId,
@@ -184,7 +188,7 @@ export const agentRouter = os.agent.router({
     });
   }),
 
-  savePlan: os.agent.savePlan.handler(async ({ input }) => {
+  savePlan: os.session.savePlan.handler(async ({ input }) => {
     const slug = input.title
       ? input.title
           .toLowerCase()
@@ -200,7 +204,7 @@ export const agentRouter = os.agent.router({
     return { path: filePath };
   }),
 
-  setModelSetting: os.agent.setModelSetting.handler(async ({ input, context }) => {
+  setModelSetting: os.session.setModelSetting.handler(async ({ input, context }) => {
     const { sessionId, model, scope } = input;
     const cwd = context.sessionManager.getSessionCwd(sessionId);
     agentLog(

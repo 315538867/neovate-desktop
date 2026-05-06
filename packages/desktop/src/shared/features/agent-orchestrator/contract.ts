@@ -24,7 +24,7 @@ import type {
   TraceEvent,
 } from "./types";
 
-import { budgetSchema, resumeStrategySchema } from "./schemas";
+import { budgetSchema, resumeStrategySchema, runStatusSchema } from "./schemas";
 
 export const orchestratorContract = {
   /** List built-in + user pipeline templates available to start. */
@@ -56,7 +56,7 @@ export const orchestratorContract = {
       z
         .object({
           projectId: z.string().optional(),
-          status: z.array(z.string()).optional(),
+          status: z.array(runStatusSchema).optional(),
           limit: z.number().int().positive().max(500).optional(),
         })
         .optional(),

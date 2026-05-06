@@ -4,14 +4,34 @@ import { RPCHandler } from "@orpc/server/message-port";
 import debug from "debug";
 import { app, ipcMain, BrowserWindow } from "electron";
 import { homedir } from "node:os";
+import { join } from "node:path";
 
 import type { AppContext } from "./router";
 
 import { isMac } from "../shared/platform";
 import { MainApp } from "./app";
+import { APP_DATA_DIR } from "./core/app-paths";
 import { ApplicationMenu } from "./core/menu";
 import { PowerBlockerService } from "./core/power-blocker-service";
 import { shellEnvService } from "./core/shell-service";
+import {
+  BUILTIN_TEMPLATES,
+  ChangeTracker,
+  CheckpointManager,
+  ClaudeCodeExecutor,
+  ErrorStore,
+  EventStore,
+  ExecutorRegistry,
+  LlmOnlyExecutor,
+  Orchestrator,
+  PartialOutputStore,
+  RetryPolicy,
+  RunStore,
+  SubtaskTracker,
+  TemplateRegistry,
+  TraceEmitter,
+  WorktreeManager,
+} from "./features/agent-orchestrator";
 import { RequestTracker } from "./features/agent/request-tracker";
 import { SessionManager } from "./features/agent/session-manager";
 import { PluginsService } from "./features/claude-code-plugins/plugins-service";
@@ -107,8 +127,51 @@ const updaterService = new UpdaterService({
 const pluginsService = new PluginsService();
 const skillsService = new SkillsService(projectStore, configStore, process.resourcesPath);
 
+// ── Orchestrator wiring ───────────────────────────────────────────
+// Persistence stores share the app's StorageService, which scopes each
+// namespace under APP_DATA_DIR. Worktrees live under their own subdir
+// so manual cleanup (e.g. by power users) doesn't leak into other state.
+const orchestratorStorage = mainApp.getStorage();
+const orchestratorEventStore = new EventStore(orchestratorStorage);
+const orchestratorRunStore = new RunStore(orchestratorStorage);
+const orchestratorCheckpointManager = new CheckpointManager({
+  storage: orchestratorStorage,
+});
+const orchestratorPartialOutputStore = new PartialOutputStore(orchestratorStorage);
+const orchestratorErrorStore = new ErrorStore({ storage: orchestratorStorage });
+const orchestratorTraceEmitter = new TraceEmitter({
+  eventStore: orchestratorEventStore,
+});
+const orchestratorRetryPolicy = new RetryPolicy({});
+const orchestratorWorktreeManager = new WorktreeManager({
+  root: join(APP_DATA_DIR, "orchestrator", "worktrees"),
+});
+const orchestratorExecutorRegistry = new ExecutorRegistry();
+orchestratorExecutorRegistry.register(new LlmOnlyExecutor(llmService));
+orchestratorExecutorRegistry.register(new ClaudeCodeExecutor({ sessionManager }));
+const orchestratorTemplateRegistry = new TemplateRegistry();
+for (const tpl of BUILTIN_TEMPLATES) orchestratorTemplateRegistry.register(tpl);
+const orchestratorChangeTracker = new ChangeTracker();
+const orchestratorSubtaskTracker = new SubtaskTracker();
+
+const orchestrator = new Orchestrator({
+  runStore: orchestratorRunStore,
+  eventStore: orchestratorEventStore,
+  checkpointManager: orchestratorCheckpointManager,
+  partialOutputStore: orchestratorPartialOutputStore,
+  errorStore: orchestratorErrorStore,
+  traceEmitter: orchestratorTraceEmitter,
+  retryPolicy: orchestratorRetryPolicy,
+  worktreeManager: orchestratorWorktreeManager,
+  executorRegistry: orchestratorExecutorRegistry,
+  templateRegistry: orchestratorTemplateRegistry,
+  changeTracker: orchestratorChangeTracker,
+  subtaskTracker: orchestratorSubtaskTracker,
+});
+
 const appContext: AppContext = {
   sessionManager,
+  orchestrator,
   requestTracker,
   configStore,
   llmService,
@@ -118,7 +181,7 @@ const appContext: AppContext = {
   stateStore,
   updaterService,
   mainApp,
-  storage: mainApp.getStorage(),
+  storage: orchestratorStorage,
 };
 
 // Reset crash counter after 30s of stable uptime
@@ -160,6 +223,17 @@ app.whenReady().then(async () => {
   await mainApp.start();
   startupLog("mainApp.start done %s", elapsed());
   void updaterService.init();
+
+  // Recover any runs left in `running` state from a previous unclean
+  // shutdown. Rows older than the heuristic threshold flip to
+  // `interrupted_unsafe`; everything else becomes `interrupted_graceful`
+  // so the UI can prompt the user to resume / abort.
+  try {
+    const cleanup = orchestrator.startupCleanup();
+    startupLog("orchestrator.startupCleanup marked=%d", cleanup.marked);
+  } catch (err) {
+    log("orchestrator.startupCleanup failed: %O", err);
+  }
 
   // Setup application menu (for menu items, shortcuts handled in renderer)
   menu = new ApplicationMenu(updaterService, configStore);
@@ -225,6 +299,10 @@ app.whenReady().then(async () => {
     const sessCount = sessionManager.getActiveSessions().length;
     startupLog("QUIT closing %d sessions", sessCount);
 
+    void orchestrator
+      .gracefulShutdown()
+      .then(() => qel("orchestrator.gracefulShutdown DONE"))
+      .catch((err: unknown) => log("orchestrator.gracefulShutdown failed: %O", err));
     void sessionManager.closeAll().then(() => qel("sessionManager.closeAll DONE"));
     void mainApp.stop().then(() => qel("mainApp.stop DONE"));
   });

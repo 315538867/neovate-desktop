@@ -19,7 +19,13 @@ import type {
 } from "../../../../shared/features/agent-orchestrator/types";
 import type { EventStore } from "../persistence/event-store";
 
-type WithoutSeq<T> = Omit<T, "seq">;
+/**
+ * Distributive `Omit` so the discriminated union of TraceEvent variants
+ * keeps each per-variant payload (`templateId`, `stageId`, `status`, …)
+ * after stripping `seq`. A plain `Omit<TraceEvent, "seq">` collapses the
+ * union into the intersection of common keys.
+ */
+type WithoutSeq<T> = T extends unknown ? Omit<T, "seq"> : never;
 
 /** Caller-side trace input (no `seq` — emitter assigns it). */
 export type TraceEventInput = WithoutSeq<TraceEvent>;
@@ -56,28 +62,29 @@ class Subscription {
   }
 
   iterator(): AsyncIterableIterator<TraceEvent> {
-    const self = this;
-    return {
+    const sub = this;
+    const iter: AsyncIterableIterator<TraceEvent> = {
       [Symbol.asyncIterator]() {
-        return this;
+        return iter;
       },
-      next(): Promise<IteratorResult<TraceEvent>> {
-        if (self.buffer.length > 0) {
-          const value = self.buffer.shift() as TraceEvent;
+      next: (): Promise<IteratorResult<TraceEvent>> => {
+        if (sub.buffer.length > 0) {
+          const value = sub.buffer.shift() as TraceEvent;
           return Promise.resolve({ value, done: false });
         }
-        if (self.closed) {
+        if (sub.closed) {
           return Promise.resolve({ value: undefined, done: true });
         }
         return new Promise((resolve) => {
-          self.resolveNext = resolve;
+          sub.resolveNext = resolve;
         });
       },
-      return(): Promise<IteratorResult<TraceEvent>> {
-        self.close();
+      return: (): Promise<IteratorResult<TraceEvent>> => {
+        sub.close();
         return Promise.resolve({ value: undefined, done: true });
       },
     };
+    return iter;
   }
 }
 

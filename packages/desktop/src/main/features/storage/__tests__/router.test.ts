@@ -26,6 +26,7 @@ beforeEach(() => {
   context = {
     storage,
     sessionManager: {} as any,
+    orchestrator: {} as any,
     requestTracker: new RequestTracker(),
     configStore: {} as any,
     llmService: {} as any,

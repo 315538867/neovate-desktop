@@ -5,6 +5,7 @@ import { implement } from "@orpc/server";
 import type { Contribution } from "./core/plugin/contribution";
 import type { StorageService } from "./core/storage-service";
 import type { IMainApp } from "./core/types";
+import type { Orchestrator } from "./features/agent-orchestrator";
 import type { RequestTracker } from "./features/agent/request-tracker";
 import type { SessionManager } from "./features/agent/session-manager";
 import type { PluginsService } from "./features/claude-code-plugins/plugins-service";
@@ -16,7 +17,8 @@ import type { StateStore } from "./features/state/state-store";
 import type { UpdaterService } from "./features/updater/service";
 
 import { contract } from "../shared/contract";
-import { agentRouter } from "./features/agent/router";
+import { orchestratorRouter } from "./features/agent-orchestrator";
+import { sessionRouter } from "./features/agent/router";
 import { pluginsRouter } from "./features/claude-code-plugins/router";
 import { configRouter } from "./features/config/router";
 import { deeplinkRouter } from "./features/deeplink/router";
@@ -33,6 +35,7 @@ import { utilsRouter } from "./features/utils/router";
 
 export type AppContext = {
   sessionManager: SessionManager;
+  orchestrator: Orchestrator;
   requestTracker: RequestTracker;
   configStore: ConfigStore;
   llmService: LlmService;
@@ -52,7 +55,10 @@ const os = implement(contract).$context<AppContext>();
 export function buildRouter(pluginRouters: Contribution<AnyRouter>[]) {
   return {
     ping: os.ping.handler(() => "pong" as const),
-    agent: agentRouter,
+    agent: {
+      session: sessionRouter,
+      orchestrator: orchestratorRouter,
+    },
     config: configRouter,
     deeplink: deeplinkRouter,
     electron: electronRouter,
