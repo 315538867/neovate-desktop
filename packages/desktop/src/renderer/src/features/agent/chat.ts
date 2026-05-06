@@ -39,7 +39,6 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
   readonly #transport: ClaudeCodeChatTransport;
   readonly #state: ClaudeCodeChatState;
   #streamingState: StreamingUIMessageState<ClaudeCodeUIMessage> | null = null;
-  #messageIndex = -1;
   #flushHandle: number | null = null;
   #pendingFlush = false;
 
@@ -128,15 +127,9 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
     this.#pendingFlush = false;
     // Single setter — chat-state routes the assistant message into the
     // dedicated streaming slot, leaving stableMessages reference untouched
-    // so memoized list components can skip reconciles. Index tracking is
-    // retained (commitStreamingMessage on `finish` decides the final
-    // position) but we no longer mutate stableMessages every frame.
+    // so memoized list components can skip reconciles. The committed
+    // position is decided by commitStreamingMessage on `finish`.
     this.#state.setStreamingMessage(this.#streamingState.message);
-    if (this.#messageIndex < 0) {
-      // Will become stableMessages.length once committed; record for
-      // legacy callers (none currently rely on this between push/commit).
-      this.#messageIndex = this.#state.messages.length - 1;
-    }
   };
 
   #cancelFlush = () => {
@@ -198,7 +191,6 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
           lastMessage: undefined,
           messageId: this.generateId(),
         });
-        this.#messageIndex = -1;
         this.#state.status = "streaming";
       }
       if (this.#streamingState) {

@@ -59,6 +59,15 @@ type DerivedCache = {
   combined: ClaudeCodeUIMessage[];
 };
 
+/**
+ * Subset of store fields written by per-message timing bookkeeping. Tightened
+ * from `Partial<ClaudeCodeChatStoreState>` so a typo can't silently mutate
+ * an unrelated field (e.g. `pendingRequests`).
+ */
+type TimingUpdate = Partial<
+  Pick<ClaudeCodeChatStoreState, "thinkingStartedAt" | "thinkingDuration" | "lastChunkAt">
+>;
+
 export class ClaudeCodeChatState implements ChatState<ClaudeCodeUIMessage> {
   readonly store: StoreApi<ClaudeCodeChatStoreState>;
   #cache: DerivedCache | null = null;
@@ -134,7 +143,7 @@ export class ClaudeCodeChatState implements ChatState<ClaudeCodeUIMessage> {
   pushMessage = (message: ClaudeCodeUIMessage) => {
     const now = Date.now();
     const state = this.store.getState();
-    const timingUpdate: Partial<ClaudeCodeChatStoreState> = { lastChunkAt: now };
+    const timingUpdate: TimingUpdate = { lastChunkAt: now };
 
     // If thinking was active when a new message starts, accumulate duration
     if (state.thinkingStartedAt) {
@@ -159,29 +168,40 @@ export class ClaudeCodeChatState implements ChatState<ClaudeCodeUIMessage> {
   };
 
   /**
-   * AI SDK contract: index is into the combined `messages` array. We map it
-   * back to either the streaming slot or stableMessages, preserving the
-   * original "replace by index" semantics for callers.
+   * Compute the timing-bookkeeping diff for a streaming-slot write. The last
+   * part's type drives reasoning state — see `replaceMessage` /
+   * `setStreamingMessage` callers.
    */
-  replaceMessage = (index: number, message: ClaudeCodeUIMessage) => {
+  #computeStreamingTiming = (message: ClaudeCodeUIMessage): TimingUpdate => {
     const now = Date.now();
     const state = this.store.getState();
     const lastPart = message.parts[message.parts.length - 1];
     const isReasoning = lastPart?.type === "reasoning";
 
-    const timingUpdate: Partial<ClaudeCodeChatStoreState> = {};
+    const update: TimingUpdate = {};
 
     if (isReasoning && !state.thinkingStartedAt) {
-      timingUpdate.thinkingStartedAt = now;
+      update.thinkingStartedAt = now;
     } else if (!isReasoning && state.thinkingStartedAt) {
-      timingUpdate.thinkingDuration =
-        (state.thinkingDuration ?? 0) + (now - state.thinkingStartedAt);
-      timingUpdate.thinkingStartedAt = null;
+      update.thinkingDuration = (state.thinkingDuration ?? 0) + (now - state.thinkingStartedAt);
+      update.thinkingStartedAt = null;
     }
 
     if (!isReasoning) {
-      timingUpdate.lastChunkAt = now;
+      update.lastChunkAt = now;
     }
+
+    return update;
+  };
+
+  /**
+   * AI SDK contract: index is into the combined `messages` array. We map it
+   * back to either the streaming slot or stableMessages, preserving the
+   * original "replace by index" semantics for callers.
+   */
+  replaceMessage = (index: number, message: ClaudeCodeUIMessage) => {
+    const timingUpdate = this.#computeStreamingTiming(message);
+    const state = this.store.getState();
 
     const stableLen = state.stableMessages.length;
     if (state.streamingMessage && index === stableLen) {
@@ -224,25 +244,7 @@ export class ClaudeCodeChatState implements ChatState<ClaudeCodeUIMessage> {
    * "is this the first frame" themselves.
    */
   setStreamingMessage = (message: ClaudeCodeUIMessage) => {
-    const now = Date.now();
-    const state = this.store.getState();
-    const lastPart = message.parts[message.parts.length - 1];
-    const isReasoning = lastPart?.type === "reasoning";
-
-    const timingUpdate: Partial<ClaudeCodeChatStoreState> = {};
-
-    if (isReasoning && !state.thinkingStartedAt) {
-      timingUpdate.thinkingStartedAt = now;
-    } else if (!isReasoning && state.thinkingStartedAt) {
-      timingUpdate.thinkingDuration =
-        (state.thinkingDuration ?? 0) + (now - state.thinkingStartedAt);
-      timingUpdate.thinkingStartedAt = null;
-    }
-
-    if (!isReasoning) {
-      timingUpdate.lastChunkAt = now;
-    }
-
+    const timingUpdate = this.#computeStreamingTiming(message);
     this.store.setState({ ...timingUpdate, streamingMessage: this.snapshot(message) });
   };
 
