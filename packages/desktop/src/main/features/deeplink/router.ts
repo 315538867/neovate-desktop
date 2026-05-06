@@ -23,4 +23,18 @@ export const deeplinkRouter = os.deeplink.router({
       yield event;
     }
   }),
+
+  subscribeConfirmRequest: os.deeplink.subscribeConfirmRequest.handler(async function* ({
+    context,
+    signal,
+  }) {
+    const bus = context.mainApp.deeplinkConfirmBus;
+    for await (const event of bus.publisher.subscribe("confirm", { signal })) {
+      yield event;
+    }
+  }),
+
+  respondConfirmRequest: os.deeplink.respondConfirmRequest.handler(({ input, context }) => {
+    context.mainApp.deeplinkConfirmBus.respond(input.requestId, input.approved);
+  }),
 });

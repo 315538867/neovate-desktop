@@ -504,6 +504,10 @@
   "deeplink.projectNotFound": "项目未找到",
   "deeplink.sessionNotFound": "会话未找到",
   "deeplink.sessionLoadFailed": "加载会话失败",
+  "deeplink.confirm.title": "打开此 Deeplink？",
+  "deeplink.confirm.description": "外部应用请求 Neovate 打开下面的链接。仅在您主动发起此操作时继续。",
+  "deeplink.confirm.approve": "打开",
+  "deeplink.confirm.reject": "取消",
 
   "debug.activeSessions": "活跃会话",
   "debug.closeSession": "关闭会话",

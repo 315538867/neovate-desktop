@@ -15,6 +15,7 @@ import { DisposableStore } from "./core/disposable";
 import { PluginManager } from "./core/plugin/plugin-manager";
 import { shellEnvService } from "./core/shell-service";
 import { StorageService } from "./core/storage-service";
+import { DeeplinkConfirmBus } from "./features/deeplink/confirm-bus";
 import { buildRouter } from "./router";
 
 const log = debug("neovate:startup");
@@ -32,6 +33,7 @@ export class MainApp implements IMainApp {
   readonly subscriptions = new DisposableStore();
   readonly windowManager: IBrowserWindowManager;
   readonly deeplink: DeeplinkService;
+  readonly deeplinkConfirmBus: DeeplinkConfirmBus;
   private readonly storage: StorageService;
   private readonly llmService: ILlmService;
   #router: AnyRouter | null = null;
@@ -49,6 +51,7 @@ export class MainApp implements IMainApp {
     this.pluginManager = new PluginManager(options.plugins ?? []);
     this.windowManager = new BrowserWindowManager({ analytics: this.analytics });
     this.deeplink = new DeeplinkService();
+    this.deeplinkConfirmBus = new DeeplinkConfirmBus();
     this.storage = new StorageService();
     // Fallback to a stub that always reports unavailable
     this.llmService = options.llmService ?? {
@@ -92,6 +95,8 @@ export class MainApp implements IMainApp {
 
     this.deeplink.dispose();
     el("deeplink.dispose");
+    this.deeplinkConfirmBus.dispose();
+    el("deeplinkConfirmBus.dispose");
     this.storage.dispose();
     el("storage.dispose");
     await this.pluginManager.deactivate();

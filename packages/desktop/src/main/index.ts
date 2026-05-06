@@ -188,7 +188,11 @@ const appContext: AppContext = {
 setTimeout(() => projectStore.clearCrashCounter(), 30_000);
 
 // ── Deeplink ──
-// open-url at module level — critical for cold launch on macOS
+// open-url at module level — critical for cold launch on macOS.
+// Wave 4.3 commit 7.3: require user confirmation before dispatching the
+// deeplink. External callers (browsers, OS apps) can trigger this without
+// user intent, so we always show a modal first and only proceed on
+// approval. Default-deny on timeout.
 app.on("open-url", (event, url) => {
   event.preventDefault();
   const win = BrowserWindow.getAllWindows()[0];
@@ -196,7 +200,26 @@ app.on("open-url", (event, url) => {
     win.show();
     win.focus();
   }
-  mainApp.deeplink.handle(url);
+  let parsedScheme = "";
+  let parsedHost = "";
+  try {
+    const parsed = new URL(url);
+    parsedScheme = parsed.protocol.replace(/:$/, "");
+    parsedHost = parsed.hostname;
+  } catch {
+    // Malformed URL — let the deeplink service log + drop it without prompt.
+    log("open-url: malformed URL, skipping confirm: %s", url);
+    return;
+  }
+  void mainApp.deeplinkConfirmBus
+    .request({ url, scheme: parsedScheme, host: parsedHost })
+    .then((approved) => {
+      if (approved) {
+        mainApp.deeplink.handle(url);
+      } else {
+        log("deeplink rejected by user: %s", url);
+      }
+    });
 });
 
 // Register app-level deeplink handler before start()

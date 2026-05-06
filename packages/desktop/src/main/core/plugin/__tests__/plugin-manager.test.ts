@@ -27,6 +27,12 @@ function makeCtx(): PluginContext {
         dispose: vi.fn(),
         publisher: { size: 0, publish: vi.fn(), subscribe: vi.fn() },
       } as any,
+      deeplinkConfirmBus: {
+        publisher: { size: 0, publish: vi.fn(), subscribe: vi.fn() },
+        request: vi.fn(),
+        respond: vi.fn(),
+        dispose: vi.fn(),
+      } as any,
       analytics: { track: vi.fn() } as any,
     },
     orpcServer: { router: vi.fn(), handler: vi.fn() } as any,

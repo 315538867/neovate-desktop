@@ -502,6 +502,10 @@
   "deeplink.projectNotFound": "Project not found",
   "deeplink.sessionNotFound": "Session not found",
   "deeplink.sessionLoadFailed": "Failed to load session",
+  "deeplink.confirm.title": "Open this deeplink?",
+  "deeplink.confirm.description": "An external app is asking Neovate to open the link below. Only continue if you started this action.",
+  "deeplink.confirm.approve": "Open",
+  "deeplink.confirm.reject": "Cancel",
 
   "debug.activeSessions": "Active Sessions",
   "debug.closeSession": "Close session",
