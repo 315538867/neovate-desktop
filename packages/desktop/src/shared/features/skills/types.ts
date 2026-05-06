@@ -21,6 +21,9 @@ export interface SkillMeta {
   frontmatter: SkillFrontmatter;
   version?: string;
   installedFrom?: string;
+  /** Where the skill came from. `undefined` for skills with no `.neovate-install.json`
+   *  (e.g. user-authored skills or imports from before Wave 4.2). */
+  source?: SkillSource;
 }
 
 export interface RecommendedSkill {
