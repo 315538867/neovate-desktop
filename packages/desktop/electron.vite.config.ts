@@ -28,7 +28,10 @@ export default defineConfig({
     build: {
       outDir: "dist/preload",
       externalizeDeps: {
-        exclude: ["@electron-toolkit/preload"],
+        // Sandbox=true preload cannot require external node_modules at runtime;
+        // bundle anything we import here. `debug` was hitting "module not found"
+        // after sandbox was enabled in c5f967a2.
+        exclude: ["@electron-toolkit/preload", "debug"],
       },
     },
   },
