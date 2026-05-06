@@ -5,12 +5,13 @@
  * "Back to app" affordance, and a content area on the right that switches
  * between an empty state, the run list, and the active run detail.
  *
- * Wave 3.4 commit 4.1 deliberately ships a minimal but complete shell — a
- * follow-up commit will plug in the trace event stream panel.
+ * Wave 3.4 commit 4.2 plugs in the live trace stream panel under the
+ * stage graph; clicking a `stage.*` event row scrolls/selects the
+ * matching execution highlight in the graph.
  */
 
 import { ArrowLeft, Network, RefreshCw, Workflow } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "../../../components/ui/button";
 import {
@@ -28,6 +29,7 @@ import { useRuns } from "../hooks/use-runs";
 import { useOrchestratorStore } from "../store";
 import { RunCard } from "./run-card";
 import { StageGraph } from "./stage-graph";
+import { TracePanel } from "./trace-panel";
 
 export function OrchestratorPanel() {
   const setShowOrchestrator = useOrchestratorStore((s) => s.setShowOrchestrator);
@@ -44,6 +46,11 @@ export function OrchestratorPanel() {
 
   const { refresh } = useRuns({ projectId });
   useRunSubscription(activeRunId);
+
+  const [selectedStageRef, setSelectedStageRef] = useState<{
+    stageId: string;
+    branchIndex: number;
+  } | null>(null);
 
   // ESC closes the overlay.
   useEffect(() => {
@@ -63,6 +70,11 @@ export function OrchestratorPanel() {
       setActiveRunId(runs[0].id);
     }
   }, [activeRunId, runs, setActiveRunId]);
+
+  // Reset selected trace stage whenever the active run changes.
+  useEffect(() => {
+    setSelectedStageRef(null);
+  }, [activeRunId]);
 
   const activeTemplate = useMemo(() => {
     if (!activeRun) return null;
@@ -163,9 +175,23 @@ export function OrchestratorPanel() {
                 <p className="mb-6 text-sm text-muted-foreground">{activeTemplate.description}</p>
               )}
 
-              <section>
+              <section className="mb-8">
                 <h2 className="mb-3 text-sm font-semibold text-foreground">Stages</h2>
                 <StageGraph run={activeRun} template={activeTemplate} />
+              </section>
+
+              <section>
+                <h2 className="mb-3 text-sm font-semibold text-foreground">Trace</h2>
+                <div className="h-[420px]">
+                  <TracePanel
+                    runId={activeRunId}
+                    runStartedAt={activeRun.startedAt}
+                    selectedStageRef={selectedStageRef}
+                    onSelectStage={(stageId, branchIndex) =>
+                      setSelectedStageRef({ stageId, branchIndex })
+                    }
+                  />
+                </div>
               </section>
             </div>
           </div>
