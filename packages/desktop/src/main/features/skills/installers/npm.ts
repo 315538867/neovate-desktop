@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 
 import { shellEnvService } from "../../../core/shell-service";
 import { BaseSkillInstaller, type FetchResult } from "./base";
+import { assertRegistryAllowed } from "./registry-policy";
 
 const execFileAsync = promisify(execFile);
 
@@ -50,7 +51,12 @@ export class NpmInstaller extends BaseSkillInstaller<NpmInfo> {
 
   private resolveRegistry(sourceRef: string): { pkg: string; registry?: string } {
     const { pkg, registry } = this.parseSourceRef(sourceRef);
-    return { pkg, registry: registry ?? this.getDefaultRegistry() };
+    const effective = registry ?? this.getDefaultRegistry();
+    // Wave 4.3 commit 7.4: block attacker-controlled registries before
+    // either install (fetchToTemp) or version probe (queryLatestVersion)
+    // can shell out to `npm`. Empty string == "use npm default" and is allowed.
+    assertRegistryAllowed(effective ?? "");
+    return { pkg, registry: effective };
   }
 
   private parseSourceRef(sourceRef: string): { pkg: string; registry?: string } {

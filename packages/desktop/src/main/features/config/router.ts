@@ -11,6 +11,7 @@ const log = debug("neovate:config");
 
 import { configContract } from "../../../shared/features/config/contract";
 import { writeModelSetting } from "../agent/claude-settings";
+import { assertRegistryAllowed } from "../skills/installers/registry-policy";
 import { isKeychainAvailable } from "./config-store";
 
 const os = implement({ config: configContract }).$context<AppContext>();
@@ -61,6 +62,13 @@ export const configRouter = os.config.router({
 
   set: os.config.set.handler(({ input, context }) => {
     log("set: key=%s", input.key);
+    // Wave 4.3 commit 7.4: enforce registry whitelist before persisting.
+    // The contract layer rejects http:// / non-URL; here we additionally
+    // reject hosts not on the allowlist so a config write cannot point
+    // npm at an attacker-controlled registry.
+    if (input.key === "npmRegistry") {
+      assertRegistryAllowed(input.value as string);
+    }
     context.configStore.set(input.key, input.value as AppConfig[typeof input.key]);
   }),
 });

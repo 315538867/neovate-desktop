@@ -79,7 +79,21 @@ export const configContract = {
         }),
         z.object({
           key: z.literal("npmRegistry"),
-          value: z.string().url().or(z.literal("")),
+          // Wave 4.3 commit 7.4: empty string = use npm default; otherwise
+          // must be a parseable https URL. The host whitelist is enforced
+          // in main (registry-policy.ts) — this layer just blocks the
+          // obviously-bad shapes (http://, javascript:, garbage strings).
+          value: z.string().refine(
+            (v) => {
+              if (v === "") return true;
+              try {
+                return new URL(v).protocol === "https:";
+              } catch {
+                return false;
+              }
+            },
+            { message: "npmRegistry must be empty or an https:// URL" },
+          ),
         }),
       ]),
     )
