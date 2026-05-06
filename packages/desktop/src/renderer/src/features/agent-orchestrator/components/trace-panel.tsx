@@ -9,6 +9,7 @@
 
 import { Eraser, ListFilter, Pause, Play } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import type { TraceEvent } from "../../../../../shared/features/agent-orchestrator/types";
 
@@ -36,6 +37,7 @@ export function TracePanel({
   selectedStageRef,
   onSelectStage,
 }: TracePanelProps) {
+  const { t } = useTranslation();
   const [enabled, setEnabled] = useState<TraceCategory[]>(() => [...TRACE_CATEGORIES]);
   const [paused, setPaused] = useState(false);
   const resetEventsForRun = useOrchestratorStore((s) => s.resetEventsForRun);
@@ -102,7 +104,7 @@ export function TracePanel({
       <header className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
         <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
           <ListFilter className="size-3.5" />
-          <span>Filter</span>
+          <span>{t("orchestrator.trace.filter")}</span>
         </div>
         <div className="flex flex-wrap items-center gap-1">
           {TRACE_CATEGORIES.map((category) => {
@@ -126,7 +128,7 @@ export function TracePanel({
             variant="ghost"
             size="sm"
             onClick={() => setPaused((p) => !p)}
-            title={paused ? "Resume auto-scroll" : "Pause auto-scroll"}
+            title={paused ? t("orchestrator.trace.resume") : t("orchestrator.trace.pause")}
           >
             {paused ? <Play className="size-3.5" /> : <Pause className="size-3.5" />}
           </Button>
@@ -135,7 +137,7 @@ export function TracePanel({
             size="sm"
             onClick={handleClear}
             disabled={!runId || totalCount === 0}
-            title="Clear events"
+            title={t("orchestrator.trace.clear")}
           >
             <Eraser className="size-3.5" />
           </Button>
@@ -145,13 +147,13 @@ export function TracePanel({
       <div ref={listRef} className="flex-1 overflow-y-auto px-2 py-1">
         {!runId ? (
           <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-            Select a run to inspect its trace stream.
+            {t("orchestrator.trace.empty.noRun")}
           </p>
         ) : events.length === 0 ? (
           <p className="px-2 py-6 text-center text-xs text-muted-foreground">
             {totalCount === 0
-              ? "Waiting for events…"
-              : "All events filtered out — toggle a category above."}
+              ? t("orchestrator.trace.empty.waiting")
+              : t("orchestrator.trace.empty.filtered")}
           </p>
         ) : (
           <Rows

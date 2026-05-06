@@ -11,6 +11,7 @@
 import type { ComponentProps } from "react";
 
 import { CheckCircle2, CircleDashed, Loader2, OctagonX, SkipForward, XCircle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import type {
   PipelineTemplate,
@@ -40,15 +41,6 @@ const STATUS_ICON: Record<StageStatus, React.ComponentType<{ className?: string 
   failed: OctagonX,
   skipped: SkipForward,
   cancelled: XCircle,
-};
-
-const STATUS_LABEL: Record<StageStatus, string> = {
-  pending: "Pending",
-  running: "Running",
-  succeeded: "Succeeded",
-  failed: "Failed",
-  skipped: "Skipped",
-  cancelled: "Cancelled",
 };
 
 export interface StageGraphProps {
@@ -82,6 +74,7 @@ function StageRow({
   execution: StageExecution;
   isCurrent: boolean;
 }) {
+  const { t } = useTranslation();
   const Icon = STATUS_ICON[execution.status];
   const duration = formatDuration(execution.startedAt, execution.completedAt);
   return (
@@ -106,11 +99,13 @@ function StageRow({
         <div className="flex items-center justify-between gap-2">
           <span className="truncate text-sm font-medium text-foreground">{label}</span>
           <Badge size="sm" variant={STATUS_VARIANT[execution.status]}>
-            {STATUS_LABEL[execution.status]}
+            {t(`orchestrator.stage.status.${execution.status}`)}
           </Badge>
         </div>
         <div className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground">
-          {execution.branchIndex > 0 && <span>branch #{execution.branchIndex}</span>}
+          {execution.branchIndex > 0 && (
+            <span>{t("orchestrator.stage.branchLabel", { index: execution.branchIndex })}</span>
+          )}
           {duration && <span>{duration}</span>}
           {execution.usage?.usedTokens ? (
             <span>{execution.usage.usedTokens.toLocaleString()} tokens</span>
@@ -132,13 +127,10 @@ function StageRow({
 }
 
 export function StageGraph({ run, template }: StageGraphProps) {
+  const { t } = useTranslation();
   const stages = template?.stages ?? [];
   if (stages.length === 0) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        Stage layout unavailable — template metadata not loaded.
-      </p>
-    );
+    return <p className="text-xs text-muted-foreground">{t("orchestrator.stage.unavailable")}</p>;
   }
 
   return (
@@ -176,13 +168,15 @@ export function StageGraph({ run, template }: StageGraphProps) {
           <div key={stage.id} className="space-y-1">
             <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
               <span>{label}</span>
-              <span className="text-[10px] font-normal">({executions.length} branches)</span>
+              <span className="text-[10px] font-normal">
+                {t("orchestrator.stage.branchCount", { count: executions.length })}
+              </span>
             </div>
             <div className="space-y-1 pl-3">
               {executions.map((exec) => (
                 <StageRow
                   key={`${stage.id}#${exec.branchIndex}`}
-                  label={`${label} · branch ${exec.branchIndex}`}
+                  label={`${label} · ${t("orchestrator.stage.branchLabel", { index: exec.branchIndex })}`}
                   execution={exec}
                   isCurrent={isCurrent}
                 />

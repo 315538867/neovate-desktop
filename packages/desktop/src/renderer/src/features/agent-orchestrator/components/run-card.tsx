@@ -9,6 +9,7 @@
 import type { ComponentProps } from "react";
 
 import { cva, type VariantProps } from "class-variance-authority";
+import { useTranslation } from "react-i18next";
 
 import type {
   RunStatus,
@@ -29,17 +30,6 @@ const STATUS_VARIANT: Record<RunStatus, BadgeVariant> = {
   cancelled: "secondary",
   interrupted_graceful: "warning",
   interrupted_unsafe: "error",
-};
-
-const STATUS_LABEL: Record<RunStatus, string> = {
-  pending: "Pending",
-  running: "Running",
-  paused_user_gate: "User gate",
-  completed: "Completed",
-  failed: "Failed",
-  cancelled: "Cancelled",
-  interrupted_graceful: "Interrupted",
-  interrupted_unsafe: "Interrupted",
 };
 
 const cardVariants = cva(
@@ -75,6 +65,7 @@ function formatElapsed(startedAt: number, completedAt?: number): string {
 }
 
 export function RunCard({ run, selected, className, ...props }: RunCardProps) {
+  const { t } = useTranslation();
   const elapsed = formatElapsed(run.startedAt, run.completedAt);
   const total = run.totalStageCount || 0;
   const done = run.completedStageCount || 0;
@@ -85,7 +76,7 @@ export function RunCard({ run, selected, className, ...props }: RunCardProps) {
       <div className="flex items-center justify-between gap-2">
         <span className="truncate text-sm font-medium text-foreground">{run.templateId}</span>
         <Badge size="sm" variant={STATUS_VARIANT[run.status]}>
-          {STATUS_LABEL[run.status]}
+          {t(`orchestrator.status.${run.status}`)}
         </Badge>
       </div>
       <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -105,9 +96,7 @@ export function RunCard({ run, selected, className, ...props }: RunCardProps) {
             />
           </div>
           <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
-            <span>
-              {done} / {total} stages
-            </span>
+            <span>{t("orchestrator.runCard.stages", { done, total })}</span>
             <span>{progress}%</span>
           </div>
         </div>
