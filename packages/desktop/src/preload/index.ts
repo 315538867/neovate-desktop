@@ -7,17 +7,19 @@ const log = debug("neovate:orpc:preload");
 /**
  * Trusted origins for the renderer's `start-orpc-client` handshake.
  *
- * - `file://` is the production renderer (loaded via `loadFile`).
+ * - `file://` is the production renderer (loaded via `loadFile`). When a page
+ *   is loaded from the filesystem, browsers report `event.origin` as the
+ *   string `"null"` (not an empty string, not `"file://"`). We treat this as
+ *   trusted because `event.source === window` is the real forgery-prevention
+ *   — `source` always reflects the actual posting `Window`, which iframes and
+ *   webviews cannot forge.
  * - In dev, `electron-vite` serves the renderer at `http://localhost:<port>`.
- *
- * We additionally require `event.source === window` to defeat any iframe /
- * webview that managed to call `window.postMessage` with a spoofed string —
- * `source` always reflects the actual posting `Window`, which extension /
- * embedded contexts cannot forge.
  */
 const isTrustedHandshakeEvent = (event: MessageEvent): boolean => {
   if (event.source !== window) return false;
-  if (event.origin === "" || event.origin === "null") return false;
+  // file:// pages report origin as the string "null" — this is the production path.
+  if (event.origin === "null") return true;
+  if (event.origin === "") return false;
   try {
     const { protocol, hostname } = new URL(event.origin);
     if (protocol === "file:") return true;
