@@ -183,6 +183,29 @@ describe("RunStore", () => {
     expect(runStore.get("r3")?.completedAt).toBe(999);
     expect(runStore.get("r4")?.status).toBe("failed");
   });
+
+  it("ignores malformed entries (missing id / mismatched key / non-object) during startup cleanup", () => {
+    // Simulate corrupted / electron-store-internal entries living next to
+    // real Run rows. Without filtering, markRunningAsInterruptedUnsafe()
+    // would call store.set(undefined, ...) and crash.
+    const fake = storage.scoped(RunStore.NAMESPACE) as unknown as {
+      set(arg1: string | Record<string, unknown>, value?: unknown): void;
+    };
+    fake.set("__internal__", { migrations: { version: "0.0.0" } });
+    fake.set("orphan", { status: "running" }); // no id field
+    fake.set("mismatched", { id: "different-key", status: "running" });
+    runStore.save(makeRun({ id: "r1", status: "running" }));
+
+    expect(() => runStore.markRunningAsInterruptedUnsafe(3000)).not.toThrow();
+    expect(runStore.get("r1")?.status).toBe("interrupted_unsafe");
+  });
+
+  it("save throws on missing/empty run id", () => {
+    expect(() => runStore.save({ ...makeRun({ id: "ok" }), id: "" })).toThrow(/non-empty/);
+    expect(() =>
+      runStore.save({ ...makeRun({ id: "ok" }), id: undefined as unknown as string }),
+    ).toThrow(/non-empty/);
+  });
 });
 
 // ── EventStore ─────────────────────────────────────────────────────

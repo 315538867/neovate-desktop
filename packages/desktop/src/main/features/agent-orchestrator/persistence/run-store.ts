@@ -31,6 +31,9 @@ export class RunStore {
   constructor(private readonly storage: IStorageService) {}
 
   save(run: Run): void {
+    if (typeof run.id !== "string" || run.id.length === 0) {
+      throw new Error("RunStore.save: run.id must be a non-empty string");
+    }
     this.store().set(run.id, run);
   }
 
@@ -87,8 +90,18 @@ export class RunStore {
   }
 
   private allRuns(): Run[] {
-    const data = (this.store().store ?? {}) as Record<string, Run>;
-    return Object.values(data);
+    const data = (this.store().store ?? {}) as Record<string, unknown>;
+    const runs: Run[] = [];
+    for (const [key, value] of Object.entries(data)) {
+      if (!value || typeof value !== "object") continue;
+      const candidate = value as Partial<Run>;
+      // Skip electron-store internal nodes (e.g. `__internal__` migrations
+      // metadata) and any malformed entries lacking a valid id/status.
+      if (typeof candidate.id !== "string" || candidate.id !== key) continue;
+      if (typeof candidate.status !== "string") continue;
+      runs.push(candidate as Run);
+    }
+    return runs;
   }
 
   private store(): Store {
