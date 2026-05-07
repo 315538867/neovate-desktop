@@ -19,8 +19,15 @@ import { Streamdown } from "streamdown";
 import { markdownPlugins } from "../../lib/markdown";
 import { cn } from "../../lib/utils";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
+import { useConversationContext } from "./conversation";
 import { markdownBaseComponents } from "./markdown-base-components";
 import { Shimmer } from "./shimmer";
+import {
+  PIN_DEFER_DELAY_MS,
+  PIN_DEFER_POLL_INTERVAL_MS,
+  PIN_DEFER_POLL_TIMEOUT_MS,
+  useDeferredUntilPinned,
+} from "./use-deferred-until-pinned";
 
 interface ReasoningContextValue {
   isStreaming: boolean;
@@ -47,7 +54,6 @@ export type ReasoningProps = ComponentProps<typeof Collapsible> & {
   duration?: number;
 };
 
-const AUTO_CLOSE_DELAY = 1000;
 const MS_IN_S = 1000;
 
 export const Reasoning = memo(
@@ -99,24 +105,44 @@ export const Reasoning = memo(
       }
     }, [isStreaming, isOpen, setIsOpen, isExplicitlyClosed]);
 
-    // Auto-close when streaming ends (once only, and only if it ever streamed)
-    useEffect(() => {
-      if (hasEverStreamedRef.current && !isStreaming && isOpen && !hasAutoClosed) {
-        const timer = setTimeout(() => {
-          setIsOpen(false);
-          setHasAutoClosed(true);
-        }, AUTO_CLOSE_DELAY);
+    const { isPinnedRef, notifyHeightShrink } = useConversationContext();
 
-        return () => clearTimeout(timer);
-      }
-      return undefined;
-    }, [isStreaming, isOpen, setIsOpen, hasAutoClosed]);
+    // Auto-close when streaming ends. Runs ONLY once, and defers until the
+    // user is pinned to bottom so a programmatic collapse never shrinks
+    // content the user is currently reading (which caused flicker + yank).
+    const shouldAutoClose =
+      hasEverStreamedRef.current && !isStreaming && !!isOpen && !hasAutoClosed;
+    useDeferredUntilPinned({
+      enabled: shouldAutoClose,
+      getIsPinned: useCallback(() => isPinnedRef.current ?? true, [isPinnedRef]),
+      onCommit: useCallback(() => {
+        // Announce the upcoming height shrink so the scroll pinned-state
+        // ignores the browser's scrollTop clamp + scrollend side-effect.
+        notifyHeightShrink();
+        setIsOpen(false);
+        setHasAutoClosed(true);
+      }, [notifyHeightShrink, setIsOpen]),
+      onTimeout: useCallback(() => {
+        // Timed out — mark as auto-closed to avoid lingering forever,
+        // but do NOT force a collapse on the user.
+        setHasAutoClosed(true);
+      }, []),
+      delayMs: PIN_DEFER_DELAY_MS,
+      pollIntervalMs: PIN_DEFER_POLL_INTERVAL_MS,
+      timeoutMs: PIN_DEFER_POLL_TIMEOUT_MS,
+    });
 
     const handleOpenChange = useCallback(
       (newOpen: boolean) => {
+        // Any close path (user-clicked or programmatic) shrinks height.
+        // Pre-mask the conversation pinned-state so the resulting scrollTop
+        // clamp can't silently re-engage follow-to-bottom.
+        if (!newOpen) {
+          notifyHeightShrink();
+        }
         setIsOpen(newOpen);
       },
-      [setIsOpen],
+      [setIsOpen, notifyHeightShrink],
     );
 
     const contextValue = useMemo(

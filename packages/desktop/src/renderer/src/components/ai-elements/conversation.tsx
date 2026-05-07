@@ -29,12 +29,35 @@ export type ConversationHandle = {
 type ConversationCtxValue = {
   atBottom: boolean;
   scrollToBottom: (behavior?: "smooth" | "auto") => void;
+  /**
+   * Stable ref to the user's "follow new content" intent. Consumers (e.g.
+   * Reasoning, AssistantMessage summary collapse) read this to defer
+   * programmatic height changes while the user is reading scrollback.
+   *
+   * Outside a Conversation provider, defaults to a stable always-true ref so
+   * components rendered standalone keep their original behavior.
+   */
+  isPinnedRef: RefObject<boolean>;
+  /**
+   * Tell the conversation a programmatic height shrink is about to happen.
+   * Within ~350ms the underlying pinned-state will ignore `scrollend` events
+   * from the resulting browser scrollTop-clamp, preventing the user from
+   * being yanked back to bottom by the shrink itself.
+   */
+  notifyHeightShrink: () => void;
 };
+
+const DEFAULT_PINNED_REF: RefObject<boolean> = { current: true };
+const NOOP = () => {};
 
 const ConversationCtx = createContext<ConversationCtxValue>({
   atBottom: true,
   scrollToBottom: () => {},
+  isPinnedRef: DEFAULT_PINNED_REF,
+  notifyHeightShrink: NOOP,
 });
+
+export const useConversationContext = () => useContext(ConversationCtx);
 
 export type ConversationProps = {
   items: ReactNode[];
@@ -67,7 +90,7 @@ export const Conversation = forwardRef<HTMLDivElement, ConversationProps>(
     // Sole truth source for whether new content should follow to bottom.
     // Mutating isPinnedRef does not trigger re-renders; Virtuoso re-evaluates
     // the followOutput callback on every items change.
-    const { isPinnedRef, pinToBottom } = usePinnedState(scrollerRef);
+    const { isPinnedRef, pinToBottom, notifyHeightShrink } = usePinnedState(scrollerRef);
     const atBottomLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const scrollToBottom = useCallback(
@@ -127,8 +150,8 @@ export const Conversation = forwardRef<HTMLDivElement, ConversationProps>(
     }, []);
 
     const ctxValue = useMemo<ConversationCtxValue>(
-      () => ({ atBottom, scrollToBottom }),
-      [atBottom, scrollToBottom],
+      () => ({ atBottom, scrollToBottom, isPinnedRef, notifyHeightShrink }),
+      [atBottom, scrollToBottom, isPinnedRef, notifyHeightShrink],
     );
 
     return (

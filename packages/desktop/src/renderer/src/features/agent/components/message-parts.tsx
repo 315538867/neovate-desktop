@@ -11,6 +11,7 @@ import type {
   ClaudeCodeUITools,
 } from "../../../../../shared/claude-code/types";
 
+import { useConversationContext } from "../../../components/ai-elements/conversation";
 import {
   Message,
   MessageAction,
@@ -93,6 +94,7 @@ function AssistantMessageParts({
   renderToolPart: RenderToolPart;
   isComplete?: boolean;
 }) {
+  const { isPinnedRef, notifyHeightShrink } = useConversationContext();
   const {
     collapseMode,
     collapsibleMessage,
@@ -103,7 +105,10 @@ function AssistantMessageParts({
     setIsOpen,
     trailingMessage,
     toolCallCount,
-  } = useAssistantMessageSummaryCollapse(message);
+  } = useAssistantMessageSummaryCollapse(message, {
+    getIsPinned: useCallback(() => isPinnedRef.current, [isPinnedRef]),
+    notifyHeightShrink,
+  });
   const { t } = useTranslation();
 
   const triggerLabel = [
@@ -113,6 +118,14 @@ function AssistantMessageParts({
   ]
     .filter(Boolean)
     .join(t("chat.messages.summarySeparator"));
+
+  const handleSummaryOpenChange = useCallback(
+    (next: boolean) => {
+      if (!next) notifyHeightShrink();
+      setIsOpen(next);
+    },
+    [setIsOpen, notifyHeightShrink],
+  );
 
   if (!isCollapsible || trailingMessage == null) {
     return (
@@ -126,7 +139,7 @@ function AssistantMessageParts({
 
   return (
     <div className="flex flex-col gap-2 w-full">
-      <Collapsible className="w-full" onOpenChange={setIsOpen} open={isOpen}>
+      <Collapsible className="w-full" onOpenChange={handleSummaryOpenChange} open={isOpen}>
         <CollapsibleTrigger
           className={cn(
             "flex w-full items-center gap-2 text-sm text-muted-foreground transition-[color,height,margin,opacity] duration-200 hover:text-foreground",

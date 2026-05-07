@@ -1,9 +1,31 @@
 import { isDataUIPart, isReasoningUIPart, isToolUIPart } from "ai";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ClaudeCodeUIMessage } from "../../../../../shared/claude-code/types";
 
-const AUTO_CLOSE_DELAY = 1000;
+import {
+  PIN_DEFER_DELAY_MS,
+  PIN_DEFER_POLL_INTERVAL_MS,
+  PIN_DEFER_POLL_TIMEOUT_MS,
+  useDeferredUntilPinned,
+} from "../../../components/ai-elements/use-deferred-until-pinned";
+
+export type AssistantMessageSummaryCollapseOptions = {
+  /**
+   * Returns true when the conversation is currently pinned to bottom (i.e.
+   * the user is following streaming output, not reading scrollback). When
+   * provided and false, the auto-collapse step is deferred until the user
+   * returns to the bottom — preventing the collapse from shrinking content
+   * the user is actively reading.
+   */
+  getIsPinned?: () => boolean;
+  /**
+   * Called immediately before a programmatic collapse so the conversation's
+   * scroll pinned-state can ignore the resulting browser scrollTop-clamp +
+   * scrollend events. Without this, the clamp can silently re-pin the user.
+   */
+  notifyHeightShrink?: () => void;
+};
 
 export type CollapseMode = "normal" | "prepare" | "collapsed";
 type CollapseKind = "live" | "restored" | null;
@@ -80,7 +102,19 @@ function getTrailingPartIndex(args: {
   return -1;
 }
 
-export function useAssistantMessageSummaryCollapse(message: ClaudeCodeUIMessage) {
+export function useAssistantMessageSummaryCollapse(
+  message: ClaudeCodeUIMessage,
+  options?: AssistantMessageSummaryCollapseOptions,
+) {
+  const { getIsPinned, notifyHeightShrink } = options ?? {};
+  // Keep latest options in refs so the effect deps stay stable; option
+  // identity churn must NOT restart the auto-collapse timer.
+  const getIsPinnedRef = useRef(getIsPinned);
+  const notifyHeightShrinkRef = useRef(notifyHeightShrink);
+  useEffect(() => {
+    getIsPinnedRef.current = getIsPinned;
+    notifyHeightShrinkRef.current = notifyHeightShrink;
+  }, [getIsPinned, notifyHeightShrink]);
   const {
     collapsibleMessage,
     trailingMessage,
@@ -191,14 +225,9 @@ export function useAssistantMessageSummaryCollapse(message: ClaudeCodeUIMessage)
     collapseKind === "restored" ? "collapsed" : "normal",
   );
   const [isOpen, setIsOpen] = useState(false);
-  const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (collapseKind == null) {
-      if (collapseTimerRef.current != null) {
-        clearTimeout(collapseTimerRef.current);
-        collapseTimerRef.current = null;
-      }
       setCollapseMode("normal");
       setIsOpen(false);
       return undefined;
@@ -216,24 +245,23 @@ export function useAssistantMessageSummaryCollapse(message: ClaudeCodeUIMessage)
     }
   }, [collapseKind, collapseMode]);
 
-  useEffect(() => {
-    if (collapseKind !== "live" || collapseMode !== "prepare") {
-      return undefined;
-    }
-
-    collapseTimerRef.current = setTimeout(() => {
-      collapseTimerRef.current = null;
+  useDeferredUntilPinned({
+    enabled: collapseKind === "live" && collapseMode === "prepare",
+    getIsPinned: useCallback(() => getIsPinnedRef.current?.() ?? true, []),
+    onCommit: useCallback(() => {
+      notifyHeightShrinkRef.current?.();
       setCollapseMode("collapsed");
       setIsOpen(false);
-    }, AUTO_CLOSE_DELAY);
-
-    return () => {
-      if (collapseTimerRef.current != null) {
-        clearTimeout(collapseTimerRef.current);
-        collapseTimerRef.current = null;
-      }
-    };
-  }, [collapseKind, collapseMode]);
+    }, []),
+    onTimeout: useCallback(() => {
+      // Timed out — leave content expanded; do not yank the user.
+      // Mark collapsed so the trigger isn't stuck in `prepare`.
+      setCollapseMode("collapsed");
+    }, []),
+    delayMs: PIN_DEFER_DELAY_MS,
+    pollIntervalMs: PIN_DEFER_POLL_INTERVAL_MS,
+    timeoutMs: PIN_DEFER_POLL_TIMEOUT_MS,
+  });
 
   return {
     collapseMode,

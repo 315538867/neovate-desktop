@@ -206,7 +206,14 @@ describe("usePinnedState", () => {
 
     act(() => result.current.leaveBottom());
     expect(result.current.isPinnedRef.current).toBe(false);
-    // User has stopped scrolling AND is at the geometric bottom.
+    // User has stopped scrolling AND is at the geometric bottom — but a
+    // scrollend without a recent downward intent must NOT re-pin (the
+    // intent gate blocks the browser's scrollTop-clamp side-effect).
+    el.dispatchEvent(new Event("scrollend"));
+    expect(result.current.isPinnedRef.current).toBe(false);
+
+    // Now express a downward intent (wheel down) AND fire scrollend at bottom.
+    el.dispatchEvent(new WheelEvent("wheel", { deltaY: 30 }));
     el.dispatchEvent(new Event("scrollend"));
     expect(result.current.isPinnedRef.current).toBe(true);
     unmount();
@@ -248,6 +255,83 @@ describe("usePinnedState", () => {
     el.dispatchEvent(new Event("scroll"));
     el.dispatchEvent(new Event("scroll"));
     expect(result.current.isPinnedRef.current).toBe(false);
+    unmount();
+  });
+
+  it("scrollend after a height-shrink mask is IGNORED (collapse-clamp regression)", async () => {
+    // Regression test: when a Reasoning block auto-collapses while the user
+    // is reading scrollback, scrollHeight shrinks. The browser then clamps
+    // scrollTop to (scrollHeight - clientHeight), which fires scroll +
+    // scrollend with geometry "at bottom". Before this fix, that clamp
+    // re-pinned the user and yanked them back down. After the fix,
+    // notifyHeightShrink() opens a 350ms mask that suppresses scrollend.
+    const { result, el, unmount } = renderPinned({
+      scrollTop: 800,
+      scrollHeight: 2000,
+      clientHeight: 500,
+    });
+    await waitForListenersBound();
+
+    act(() => result.current.leaveBottom());
+    expect(result.current.isPinnedRef.current).toBe(false);
+
+    // Component is about to programmatically collapse → notify hook first.
+    act(() => result.current.notifyHeightShrink());
+    // Layout shrinks; browser clamps scrollTop and emits scrollend at bottom.
+    mockGeometry(el, { scrollTop: 1500, scrollHeight: 2000, clientHeight: 500 });
+    el.dispatchEvent(new Event("scrollend"));
+    expect(result.current.isPinnedRef.current).toBe(false);
+    unmount();
+  });
+
+  it("scrollend without a recent downward intent does NOT flip pin", async () => {
+    const { result, el, unmount } = renderPinned({
+      scrollTop: 1500,
+      scrollHeight: 2000,
+      clientHeight: 500,
+    });
+    await waitForListenersBound();
+
+    act(() => result.current.leaveBottom());
+    // No wheel/touch/keyboard down intent — scrollend at bottom must be
+    // treated as side-effect (e.g. layout reflow), not user intent.
+    el.dispatchEvent(new Event("scrollend"));
+    expect(result.current.isPinnedRef.current).toBe(false);
+    unmount();
+  });
+
+  it("wheel down + scrollend at bottom flips pin ON (legitimate user settle)", async () => {
+    const { result, el, unmount } = renderPinned({
+      scrollTop: 1500,
+      scrollHeight: 2000,
+      clientHeight: 500,
+    });
+    await waitForListenersBound();
+
+    act(() => result.current.leaveBottom());
+    el.dispatchEvent(new WheelEvent("wheel", { deltaY: 80 }));
+    el.dispatchEvent(new Event("scrollend"));
+    expect(result.current.isPinnedRef.current).toBe(true);
+    unmount();
+  });
+
+  it("PageDown/ArrowDown count as downward intent for scrollend gating", async () => {
+    const { result, el, unmount } = renderPinned({
+      scrollTop: 1500,
+      scrollHeight: 2000,
+      clientHeight: 500,
+    });
+    await waitForListenersBound();
+
+    act(() => result.current.leaveBottom());
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown" }));
+    el.dispatchEvent(new Event("scrollend"));
+    expect(result.current.isPinnedRef.current).toBe(true);
+
+    act(() => result.current.leaveBottom());
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+    el.dispatchEvent(new Event("scrollend"));
+    expect(result.current.isPinnedRef.current).toBe(true);
     unmount();
   });
 });
