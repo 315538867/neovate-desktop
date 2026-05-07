@@ -1,176 +1,36 @@
 import debug from "debug";
-import { cp, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 
 import type {
   InstalledPlugin,
   Marketplace,
   MarketplacePlugin,
-  MarketplaceSource,
-  PluginComponents,
   PluginError,
   PluginUpdate,
 } from "../../../shared/features/claude-code-plugins/types";
 
-import { gitClone, gitCloneSubdir, gitGetHeadSha, gitPull } from "./git-utils";
+import { gitClone, gitGetHeadSha, gitPull } from "./git-utils";
+import {
+  CACHE_DIR,
+  EMPTY_INSTALLED,
+  type InstalledPluginsFile,
+  INSTALLED_PLUGINS_FILE,
+  type KnownMarketplaceEntry,
+  KNOWN_MARKETPLACES_FILE,
+  MARKETPLACES_DIR,
+  type MarketplaceManifest,
+  detectComponents,
+  parseMarketplaceInput,
+  parsePluginId,
+  readPluginManifest,
+  resolvePluginSource,
+  type SettingsFile,
+  SETTINGS_FILE,
+} from "./plugins-helpers";
+import { atomicJsonUpdate, readJsonSafe } from "./plugins-io";
 
 const log = debug("neovate:plugins");
-
-const CLAUDE_DIR = path.join(homedir(), ".claude");
-const PLUGINS_DIR = path.join(CLAUDE_DIR, "plugins");
-const INSTALLED_PLUGINS_FILE = path.join(PLUGINS_DIR, "installed_plugins.json");
-const KNOWN_MARKETPLACES_FILE = path.join(PLUGINS_DIR, "known_marketplaces.json");
-const SETTINGS_FILE = path.join(CLAUDE_DIR, "settings.json");
-const MARKETPLACES_DIR = path.join(PLUGINS_DIR, "marketplaces");
-const CACHE_DIR = path.join(PLUGINS_DIR, "cache");
-
-// -- JSON helpers --
-
-async function readJsonSafe<T>(filePath: string, fallback: T): Promise<T> {
-  try {
-    const raw = await readFile(filePath, "utf-8");
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-async function atomicJsonUpdate<T>(
-  filePath: string,
-  updater: (current: T) => T,
-  fallback: T,
-): Promise<void> {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  const current = await readJsonSafe<T>(filePath, fallback);
-  const updated = updater(current);
-  const tmp = `${filePath}.tmp.${process.pid}`;
-  await writeFile(tmp, JSON.stringify(updated, null, 2) + "\n");
-  await rename(tmp, filePath);
-}
-
-// -- Source resolution --
-
-interface PluginSourceObject {
-  source: string;
-  repo?: string;
-  url?: string;
-  path?: string;
-  ref?: string;
-  sha?: string;
-}
-
-async function resolvePluginSource(
-  source: string | PluginSourceObject,
-  marketplaceDir: string,
-  destDir: string,
-): Promise<void> {
-  if (typeof source === "string") {
-    const resolved = path.resolve(marketplaceDir, source);
-    await cp(resolved, destDir, { recursive: true });
-    return;
-  }
-  switch (source.source) {
-    case "github":
-      await gitClone(`https://github.com/${source.repo}.git`, destDir);
-      break;
-    case "url":
-      await gitClone(source.url!, destDir);
-      break;
-    case "git-subdir":
-      await gitCloneSubdir(source.url!, source.path!, source.ref, destDir);
-      break;
-    case "local":
-      await cp(source.path!, destDir, { recursive: true });
-      break;
-    default:
-      throw new Error(`Unknown plugin source type: ${source.source}`);
-  }
-}
-
-// -- Plugin manifest helpers --
-
-interface PluginManifest {
-  name?: string;
-  description?: string;
-  version?: string;
-  author?: { name: string; email?: string; url?: string };
-  homepage?: string;
-  license?: string;
-  keywords?: string[];
-  commands?: unknown;
-  commandsPaths?: unknown;
-  skills?: unknown;
-  skillsPaths?: unknown;
-  agents?: unknown;
-  agentsPaths?: unknown;
-  hooks?: unknown;
-  hooksPath?: unknown;
-  mcpServers?: unknown;
-  lspServers?: unknown;
-}
-
-function detectComponents(manifest: PluginManifest): PluginComponents {
-  return {
-    hasCommands: !!(manifest.commands || manifest.commandsPaths),
-    hasSkills: !!(manifest.skills || manifest.skillsPaths),
-    hasAgents: !!(manifest.agents || manifest.agentsPaths),
-    hasHooks: !!(manifest.hooks || manifest.hooksPath),
-    hasMcpServers: !!manifest.mcpServers,
-    hasLspServers: !!manifest.lspServers,
-  };
-}
-
-async function readPluginManifest(installPath: string): Promise<PluginManifest> {
-  const manifestPath = path.join(installPath, ".claude-plugin", "plugin.json");
-  return readJsonSafe<PluginManifest>(manifestPath, {});
-}
-
-// -- Marketplace manifest --
-
-interface MarketplaceManifest {
-  name?: string;
-  description?: string;
-  plugins?: Array<{
-    name: string;
-    description?: string;
-    author?: { name: string; email?: string; url?: string };
-    category?: string;
-    homepage?: string;
-    version?: string;
-    keywords?: string[];
-    source: string | PluginSourceObject;
-  }>;
-}
-
-// -- Installed plugins file format (v2) --
-
-interface InstalledPluginsFile {
-  version: number;
-  plugins: Record<
-    string,
-    Array<{
-      scope: string;
-      projectPath?: string;
-      installPath: string;
-      version: string;
-      installedAt: string;
-      lastUpdated: string;
-      gitCommitSha?: string;
-    }>
-  >;
-}
-
-const EMPTY_INSTALLED: InstalledPluginsFile = { version: 2, plugins: {} };
-
-// -- Settings file --
-
-interface SettingsFile {
-  enabledPlugins?: Record<string, boolean>;
-  [key: string]: unknown;
-}
-
-// ============================================================
 
 export class PluginsService {
   private errors: PluginError[] = [];
@@ -739,52 +599,4 @@ export class PluginsService {
       };
     });
   }
-}
-
-// -- Marketplace input parsing --
-
-type KnownMarketplaceEntry = {
-  source: MarketplaceSource;
-  installLocation: string;
-  lastUpdated?: string;
-  autoUpdate?: boolean;
-};
-
-function parseMarketplaceInput(input: string): {
-  name: string;
-  cloneUrl: string;
-  source: MarketplaceSource;
-} {
-  const trimmed = input.trim();
-
-  // GitHub shorthand: "owner/repo"
-  if (/^[\w.-]+\/[\w.-]+$/.test(trimmed)) {
-    return {
-      name: trimmed.split("/")[1]!,
-      cloneUrl: `https://github.com/${trimmed}.git`,
-      source: { source: "github", repo: trimmed },
-    };
-  }
-
-  // Git URL
-  if (trimmed.startsWith("https://") || trimmed.startsWith("git@")) {
-    const name =
-      trimmed
-        .split("/")
-        .pop()
-        ?.replace(/\.git$/, "") ?? "unknown";
-    return {
-      name,
-      cloneUrl: trimmed,
-      source: { source: "git", url: trimmed },
-    };
-  }
-
-  throw new Error(`Invalid marketplace source: ${trimmed}. Use "owner/repo" or a git URL.`);
-}
-
-function parsePluginId(pluginId: string): [name: string, marketplace: string] {
-  const at = pluginId.lastIndexOf("@");
-  if (at === -1) return [pluginId, "unknown"];
-  return [pluginId.slice(0, at), pluginId.slice(at + 1)];
 }
