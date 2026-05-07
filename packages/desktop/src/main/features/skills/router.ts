@@ -1,28 +1,20 @@
-import { ORPCError, implement } from "@orpc/server";
-import debug from "debug";
 import { shell } from "electron";
 
-import type { AppContext } from "../../router";
-
 import { skillsContract } from "../../../shared/features/skills/contract";
+import { defineRouter } from "../../core/router-factory";
 
-const log = debug("neovate:skills:router");
-
-const os = implement({ skills: skillsContract }).$context<AppContext>();
-
-/** Wrap service errors as ORPCError so messages survive oRPC serialization in production. */
-function wrapError(e: unknown, fallback: string): never {
-  const message = e instanceof Error ? e.message : fallback;
-  log("handler error: %s", message);
-  throw new ORPCError("BAD_GATEWAY", { defined: true, message });
-}
+const { os, wrapError } = defineRouter({
+  contract: { skills: skillsContract },
+  debugNs: "neovate:skills:router",
+  fallbackError: "Skills handler failed",
+});
 
 export const skillsRouter = os.skills.router({
   list: os.skills.list.handler(async ({ input, context }) => {
     try {
       return await context.skillsService.list(input.scope, input.projectPath);
     } catch (e) {
-      wrapError(e, "Failed to list skills");
+      return wrapError(e, "Failed to list skills");
     }
   }),
 
@@ -30,7 +22,7 @@ export const skillsRouter = os.skills.router({
     try {
       return await context.skillsService.getContent(input.dirName, input.scope, input.projectPath);
     } catch (e) {
-      wrapError(e, "Failed to read skill content");
+      return wrapError(e, "Failed to read skill content");
     }
   }),
 
@@ -38,7 +30,7 @@ export const skillsRouter = os.skills.router({
     try {
       return await context.skillsService.recommended(input.forceRefresh);
     } catch (e) {
-      wrapError(e, "Failed to fetch recommended skills");
+      return wrapError(e, "Failed to fetch recommended skills");
     }
   }),
 
@@ -46,7 +38,7 @@ export const skillsRouter = os.skills.router({
     try {
       return await context.skillsService.preview(input.source);
     } catch (e) {
-      wrapError(e, "Failed to preview skill source");
+      return wrapError(e, "Failed to preview skill source");
     }
   }),
 
@@ -59,7 +51,7 @@ export const skillsRouter = os.skills.router({
         input.projectPath,
       );
     } catch (e) {
-      wrapError(e, "Failed to install skill");
+      return wrapError(e, "Failed to install skill");
     }
   }),
 
@@ -72,7 +64,7 @@ export const skillsRouter = os.skills.router({
         input.projectPath,
       );
     } catch (e) {
-      wrapError(e, "Failed to install skills from preview");
+      return wrapError(e, "Failed to install skills from preview");
     }
   }),
 
@@ -80,7 +72,7 @@ export const skillsRouter = os.skills.router({
     try {
       await context.skillsService.remove(input.dirName, input.scope, input.projectPath);
     } catch (e) {
-      wrapError(e, "Failed to remove skill");
+      return wrapError(e, "Failed to remove skill");
     }
   }),
 
@@ -88,7 +80,7 @@ export const skillsRouter = os.skills.router({
     try {
       await context.skillsService.enable(input.dirName, input.scope, input.projectPath);
     } catch (e) {
-      wrapError(e, "Failed to enable skill");
+      return wrapError(e, "Failed to enable skill");
     }
   }),
 
@@ -96,7 +88,7 @@ export const skillsRouter = os.skills.router({
     try {
       await context.skillsService.disable(input.dirName, input.scope, input.projectPath);
     } catch (e) {
-      wrapError(e, "Failed to disable skill");
+      return wrapError(e, "Failed to disable skill");
     }
   }),
 
@@ -113,7 +105,7 @@ export const skillsRouter = os.skills.router({
     try {
       return await context.skillsService.exists(input.dirName, input.scope, input.projectPath);
     } catch (e) {
-      wrapError(e, "Failed to check skill existence");
+      return wrapError(e, "Failed to check skill existence");
     }
   }),
 
@@ -121,7 +113,7 @@ export const skillsRouter = os.skills.router({
     try {
       await context.skillsService.cancelPreview(input.previewId);
     } catch (e) {
-      wrapError(e, "Failed to cancel preview");
+      return wrapError(e, "Failed to cancel preview");
     }
   }),
 
@@ -129,7 +121,7 @@ export const skillsRouter = os.skills.router({
     try {
       return await context.skillsService.checkUpdates(input.scope, input.projectPath);
     } catch (e) {
-      wrapError(e, "Failed to check for skill updates");
+      return wrapError(e, "Failed to check for skill updates");
     }
   }),
 
@@ -137,7 +129,7 @@ export const skillsRouter = os.skills.router({
     try {
       await context.skillsService.update(input.dirName, input.scope, input.projectPath);
     } catch (e) {
-      wrapError(e, "Failed to update skill");
+      return wrapError(e, "Failed to update skill");
     }
   }),
 });

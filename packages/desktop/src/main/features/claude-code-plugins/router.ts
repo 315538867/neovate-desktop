@@ -1,26 +1,17 @@
-import { ORPCError, implement } from "@orpc/server";
-import debug from "debug";
-
-import type { AppContext } from "../../router";
-
 import { pluginsContract } from "../../../shared/features/claude-code-plugins/contract";
+import { defineRouter } from "../../core/router-factory";
 
-const log = debug("neovate:plugins:router");
-
-const os = implement({ plugins: pluginsContract }).$context<AppContext>();
-
-function wrapError(e: unknown, fallback: string): never {
-  const message = e instanceof Error ? e.message : fallback;
-  log("handler error: %s", message);
-  throw new ORPCError("BAD_GATEWAY", { defined: true, message });
-}
+const { os, wrapError } = defineRouter({
+  contract: { plugins: pluginsContract },
+  debugNs: "neovate:plugins:router",
+});
 
 export const pluginsRouter = os.plugins.router({
   listInstalled: os.plugins.listInstalled.handler(async ({ context }) => {
     try {
       return await context.pluginsService.listInstalled();
     } catch (e) {
-      wrapError(e, "Failed to list installed plugins");
+      return wrapError(e, "Failed to list installed plugins");
     }
   }),
 
@@ -28,7 +19,7 @@ export const pluginsRouter = os.plugins.router({
     try {
       await context.pluginsService.enable(input.pluginId);
     } catch (e) {
-      wrapError(e, "Failed to enable plugin");
+      return wrapError(e, "Failed to enable plugin");
     }
   }),
 
@@ -36,7 +27,7 @@ export const pluginsRouter = os.plugins.router({
     try {
       await context.pluginsService.disable(input.pluginId);
     } catch (e) {
-      wrapError(e, "Failed to disable plugin");
+      return wrapError(e, "Failed to disable plugin");
     }
   }),
 
@@ -44,7 +35,7 @@ export const pluginsRouter = os.plugins.router({
     try {
       await context.pluginsService.uninstall(input.pluginId, input.scope, input.projectPath);
     } catch (e) {
-      wrapError(e, "Failed to uninstall plugin");
+      return wrapError(e, "Failed to uninstall plugin");
     }
   }),
 
@@ -52,7 +43,7 @@ export const pluginsRouter = os.plugins.router({
     try {
       await context.pluginsService.update(input.pluginId, input.scope, input.projectPath);
     } catch (e) {
-      wrapError(e, "Failed to update plugin");
+      return wrapError(e, "Failed to update plugin");
     }
   }),
 
@@ -60,7 +51,7 @@ export const pluginsRouter = os.plugins.router({
     try {
       return await context.pluginsService.getReadme(input.pluginId, input.scope, input.projectPath);
     } catch (e) {
-      wrapError(e, "Failed to get plugin README");
+      return wrapError(e, "Failed to get plugin README");
     }
   }),
 
@@ -68,7 +59,7 @@ export const pluginsRouter = os.plugins.router({
     try {
       return await context.pluginsService.checkUpdates();
     } catch (e) {
-      wrapError(e, "Failed to check for plugin updates");
+      return wrapError(e, "Failed to check for plugin updates");
     }
   }),
 
@@ -76,7 +67,7 @@ export const pluginsRouter = os.plugins.router({
     try {
       return await context.pluginsService.updateAll();
     } catch (e) {
-      wrapError(e, "Failed to update all plugins");
+      return wrapError(e, "Failed to update all plugins");
     }
   }),
 
@@ -84,7 +75,7 @@ export const pluginsRouter = os.plugins.router({
     try {
       return await context.pluginsService.listMarketplaces();
     } catch (e) {
-      wrapError(e, "Failed to list marketplaces");
+      return wrapError(e, "Failed to list marketplaces");
     }
   }),
 
@@ -92,7 +83,7 @@ export const pluginsRouter = os.plugins.router({
     try {
       return await context.pluginsService.addMarketplace(input.source);
     } catch (e) {
-      wrapError(e, "Failed to add marketplace");
+      return wrapError(e, "Failed to add marketplace");
     }
   }),
 
@@ -100,7 +91,7 @@ export const pluginsRouter = os.plugins.router({
     try {
       await context.pluginsService.removeMarketplace(input.name);
     } catch (e) {
-      wrapError(e, "Failed to remove marketplace");
+      return wrapError(e, "Failed to remove marketplace");
     }
   }),
 
@@ -108,7 +99,7 @@ export const pluginsRouter = os.plugins.router({
     try {
       return await context.pluginsService.updateMarketplace(input.name);
     } catch (e) {
-      wrapError(e, "Failed to update marketplace");
+      return wrapError(e, "Failed to update marketplace");
     }
   }),
 
@@ -116,7 +107,7 @@ export const pluginsRouter = os.plugins.router({
     try {
       return await context.pluginsService.browseMarketplace(input.marketplace);
     } catch (e) {
-      wrapError(e, "Failed to browse marketplace");
+      return wrapError(e, "Failed to browse marketplace");
     }
   }),
 
@@ -124,7 +115,7 @@ export const pluginsRouter = os.plugins.router({
     try {
       return await context.pluginsService.discoverAll(input.search);
     } catch (e) {
-      wrapError(e, "Failed to discover plugins");
+      return wrapError(e, "Failed to discover plugins");
     }
   }),
 
@@ -137,7 +128,7 @@ export const pluginsRouter = os.plugins.router({
         input.projectPath,
       );
     } catch (e) {
-      wrapError(e, "Failed to install plugin");
+      return wrapError(e, "Failed to install plugin");
     }
   }),
 

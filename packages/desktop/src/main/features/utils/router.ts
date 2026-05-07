@@ -1,20 +1,19 @@
-import { implement } from "@orpc/server";
-import debug from "debug";
 import { app } from "electron";
 import { spawn, execSync } from "node:child_process";
 import { existsSync, statSync, rmSync, unlinkSync } from "node:fs";
 
 import type { App } from "../../../shared/features/utils/types";
-import type { AppContext } from "../../router";
 
 import { utilsContract } from "../../../shared/features/utils/contract";
+import { defineRouter } from "../../core/router-factory";
 import { shellEnvService } from "../../core/shell-service";
 import { searchWithContent } from "./search-content";
 import { searchPaths } from "./search-paths";
 
-const log = debug("neovate:utils-router");
-
-const os = implement({ utils: utilsContract }).$context<AppContext>();
+const { os, log } = defineRouter({
+  contract: { utils: utilsContract },
+  debugNs: "neovate:utils-router",
+});
 
 const APP_COMMANDS: Record<App, { cmd: string; args: (cwd: string) => string[] }> = {
   cursor: { cmd: "cursor", args: (cwd) => [cwd] },

@@ -9,16 +9,15 @@
  * client subscribers honour AbortSignal teardown deterministically.
  */
 
-import { ORPCError, implement } from "@orpc/server";
-import debug from "debug";
-
-import type { AppContext } from "../../router";
+import { ORPCError } from "@orpc/server";
 
 import { orchestratorContract } from "../../../shared/features/agent-orchestrator/contract";
+import { defineRouter } from "../../core/router-factory";
 
-const log = debug("neovate:orchestrator:router");
-
-const os = implement({ orchestrator: orchestratorContract }).$context<AppContext>();
+const { os, log } = defineRouter({
+  contract: { orchestrator: orchestratorContract },
+  debugNs: "neovate:orchestrator:router",
+});
 
 const wrap = <T>(fn: () => T): T => {
   try {

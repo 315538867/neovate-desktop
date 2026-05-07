@@ -1,16 +1,17 @@
-import { implement, ORPCError } from "@orpc/server";
-import debug from "debug";
+import { ORPCError } from "@orpc/server";
 import { BrowserWindow, dialog } from "electron";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-import type { AppContext } from "../../router";
-
 import { PLAYGROUND_PROJECT_ID } from "../../../shared/features/project/constants";
 import { projectContract } from "../../../shared/features/project/contract";
+import { defineRouter } from "../../core/router-factory";
 
-const log = debug("neovate:project");
+const { os, log } = defineRouter({
+  contract: { project: projectContract },
+  debugNs: "neovate:project",
+});
 
 /** Cached existsSync to avoid repeated filesystem checks on every list() call. */
 const pathCache = new Map<string, { exists: boolean; ts: number }>();
@@ -23,8 +24,6 @@ function pathExists(p: string): boolean {
   pathCache.set(p, { exists, ts: Date.now() });
   return exists;
 }
-
-const os = implement({ project: projectContract }).$context<AppContext>();
 
 export const projectRouter = os.project.router({
   list: os.project.list.handler(({ context }) => {

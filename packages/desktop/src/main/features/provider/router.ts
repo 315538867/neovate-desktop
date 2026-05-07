@@ -1,11 +1,10 @@
 import { Anthropic } from "@anthropic-ai/sdk";
-import { ORPCError, implement } from "@orpc/server";
-import debug from "debug";
+import { ORPCError } from "@orpc/server";
 
 import type { BenchmarkModelTestResult, Provider } from "../../../shared/features/provider/types";
-import type { AppContext } from "../../router";
 
 import { providerContract } from "../../../shared/features/provider/contract";
+import { defineRouter } from "../../core/router-factory";
 import {
   readProviderSetting,
   writeProviderSetting,
@@ -13,7 +12,10 @@ import {
 } from "../agent/claude-settings";
 import { wrapKeychainError } from "../config/keychain-error";
 
-const log = debug("neovate:provider-router");
+const { os, log } = defineRouter({
+  contract: { provider: providerContract },
+  debugNs: "neovate:provider-router",
+});
 
 const BENCHMARK_PROMPT =
   "Write a short paragraph explaining what a benchmark test measures in software engineering.";
@@ -170,8 +172,6 @@ async function runBenchmark(
     externalSignal?.removeEventListener("abort", onExternalAbort);
   }
 }
-
-const os = implement({ provider: providerContract }).$context<AppContext>();
 
 export const providerRouter = os.provider.router({
   list: os.provider.list.handler(({ context }) => {

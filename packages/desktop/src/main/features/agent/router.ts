@@ -1,17 +1,16 @@
-import { ORPCError, implement } from "@orpc/server";
-import debug from "debug";
+import { ORPCError } from "@orpc/server";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { AppContext } from "../../router";
-
 import { sessionContract } from "../../../shared/features/agent/contract";
 import { APP_DATA_DIR } from "../../core/app-paths";
+import { defineRouter } from "../../core/router-factory";
 import { readModelSetting, writeModelSetting } from "./claude-settings";
 
-const agentLog = debug("neovate:agent-router");
-
-const os = implement({ session: sessionContract }).$context<AppContext>();
+const { os, log: agentLog } = defineRouter({
+  contract: { session: sessionContract },
+  debugNs: "neovate:agent-router",
+});
 
 export const sessionRouter = os.session.router({
   activeSessions: os.session.activeSessions.handler(({ context }) => {

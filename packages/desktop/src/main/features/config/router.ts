@@ -1,20 +1,19 @@
-import { implement } from "@orpc/server";
-import debug from "debug";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { AppConfig } from "../../../shared/features/config/types";
-import type { AppContext } from "../../router";
-
-const log = debug("neovate:config");
 
 import { configContract } from "../../../shared/features/config/contract";
+import { defineRouter } from "../../core/router-factory";
 import { writeModelSetting } from "../agent/claude-settings";
 import { assertRegistryAllowed } from "../skills/installers/registry-policy";
 import { isKeychainAvailable } from "./config-store";
 
-const os = implement({ config: configContract }).$context<AppContext>();
+const { os, log } = defineRouter({
+  contract: { config: configContract },
+  debugNs: "neovate:config",
+});
 
 export const configRouter = os.config.router({
   get: os.config.get.handler(({ context }) => {
