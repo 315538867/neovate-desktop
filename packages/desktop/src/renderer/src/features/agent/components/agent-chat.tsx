@@ -1,10 +1,24 @@
+import type { ChatStatus, ToolUIPart } from "ai";
+
 import { ArrowDown01Icon, ArrowUp01Icon, Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import debug from "debug";
 import { XIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type RefObject,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 
+import type {
+  ClaudeCodeUIMessage,
+  ClaudeCodeUITools,
+} from "../../../../../shared/claude-code/types";
 import type { FileAttachment } from "../../../../../shared/features/agent/types";
 import type { ConversationHandle } from "../../../components/ai-elements/conversation";
 
@@ -24,7 +38,11 @@ import { Button } from "../../../components/ui/button";
 import { Spinner } from "../../../components/ui/spinner";
 import { cn } from "../../../lib/utils";
 import { claudeCodeChatManager } from "../chat-manager";
-import { useClaudeCodeChat } from "../hooks/use-claude-code-chat";
+import {
+  useChatStableMessages,
+  useChatStreamingMessage,
+  useClaudeCodeChat,
+} from "../hooks/use-claude-code-chat";
 import { useNewSession } from "../hooks/use-new-session";
 import { useSessionLifecycleSubscription } from "../hooks/use-session-lifecycle-subscription";
 import { BranchSwitcher } from "./branch-switcher";
@@ -35,6 +53,15 @@ import { PermissionDialog } from "./permission-dialog";
 import { TaskProgress } from "./task-progress";
 import { ClaudeCodeToolUIPart } from "./tool-parts";
 import { WelcomePanel } from "./welcome-panel";
+
+// Module-level so the prop reference is stable across ConversationView
+// re-renders — keeps memoized stableItems from invalidating.
+function renderToolPart(
+  _message: ClaudeCodeUIMessage,
+  part: ToolUIPart<ClaudeCodeUITools>,
+): React.ReactNode {
+  return <ClaudeCodeToolUIPart part={part} />;
+}
 
 function ChatError({ message, onDismiss }: { message: string; onDismiss?: () => void }) {
   const { t } = useTranslation();
@@ -131,7 +158,7 @@ export function AgentChat() {
     // In single-project mode, fetch only for the active project
     const listArgs = multiProjectSupport ? {} : { cwd: activeProjectPath };
     chatLog("effect[project-switch]: listing sessions args=%o", listArgs);
-    client.agent
+    client.agent.session
       .listSessions(listArgs)
       .then((sessions) => {
         chatLog("effect[project-switch]: listSessions returned total=%d", sessions.length);
@@ -297,29 +324,16 @@ function AgentChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }
   const isLoadingOther = useAgentStore(
     (s) => s.loadingSessionId !== null && s.loadingSessionId !== sessionId,
   );
-  const { messages, status, error, pendingRequests, sendMessage, stop, clearError } =
+  // Top-level subscribes only to the control surface (status / errors /
+  // pendingRequests / send + stop). The high-frequency streaming slot is
+  // owned by ConversationView, so streaming flushes don't re-render the
+  // input / permission / branch UI below.
+  const { status, error, pendingRequests, sendMessage, stop, clearError } =
     useClaudeCodeChat(sessionId);
   const hasPendingRequest = pendingRequests.length > 0;
 
   // Ref to access scroll context for smooth scrolling on new message
   const conversationContextRef = useRef<ConversationHandle | null>(null);
-
-  const items = useMemo(
-    () =>
-      messages.map((message, i) => (
-        <MessageParts
-          key={message.id}
-          message={message}
-          isComplete={
-            (status !== "streaming" && status !== "submitted") || i !== messages.length - 1
-          }
-          renderToolPart={(_partMessage, part) => <ClaudeCodeToolUIPart part={part} />}
-          sessionId={sessionId}
-          isStreaming={status === "streaming" || status === "submitted"}
-        />
-      )),
-    [messages, status, sessionId],
-  );
 
   const handleSend = (text: string, attachments?: FileAttachment[], parts?: SendParts) => {
     chatLog(
@@ -348,9 +362,7 @@ function AgentChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }
 
   return (
     <div className="@container/chat flex h-full flex-col">
-      <Conversation contextRef={conversationContextRef} items={items}>
-        <ConversationScrollButton />
-      </Conversation>
+      <ConversationView sessionId={sessionId} status={status} contextRef={conversationContextRef} />
       <div className="shrink-0 max-w-3xl mx-auto w-full">
         <TaskProgress tasks={tasks} />
         {error && <ChatError message={error.message} onDismiss={clearError} />}
@@ -383,5 +395,86 @@ function AgentChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Owns the two-slot subscription so streaming flushes only invalidate this
+ * subtree's memos.
+ *
+ * - `stableItems`: depends on `[stableMessages, sessionId, isStreamingActive]`.
+ *   `stableMessages` reference is preserved during streaming (chat-state
+ *   writes to the streaming slot only), so the array of `<MessageParts>`
+ *   ReactElements stays referentially equal across rAF-batched flushes.
+ *   When React reconciles the new `items` against the previous render, the
+ *   first N-1 entries are the *same* element references → it short-circuits
+ *   the diff (props identity check) without descending into MessageParts /
+ *   MessagePartRenderer subtrees.
+ * - `streamingItem`: depends on `[streamingMessage, sessionId]`. Rebuilt
+ *   every flush, but the work is bounded to one message subtree.
+ *
+ * `renderToolPart` is module-level so its identity is stable across
+ * ConversationView re-renders; passing a fresh closure would invalidate
+ * `stableItems` on every render and undo the optimisation.
+ */
+function ConversationView({
+  sessionId,
+  status,
+  contextRef,
+}: {
+  sessionId: string;
+  status: ChatStatus;
+  contextRef: RefObject<ConversationHandle | null>;
+}) {
+  const stableMessages = useChatStableMessages(sessionId);
+  const streamingMessage = useChatStreamingMessage(sessionId);
+  const isStreamingActive = status === "streaming" || status === "submitted";
+
+  // useDeferredValue lets React fall behind on streaming-bubble updates when
+  // the main thread is busy (typing, scrolling, heavy markdown rendering).
+  // The streaming slot is "best-effort recent" — falling 1-2 frames behind
+  // is invisible to the user but keeps interactions responsive. The stable
+  // list is unaffected (separate subscription, separate memo).
+  const deferredStreamingMessage = useDeferredValue(streamingMessage);
+
+  const stableItems = useMemo(
+    () =>
+      stableMessages.map((message) => (
+        <MessageParts
+          key={message.id}
+          message={message}
+          isComplete
+          renderToolPart={renderToolPart}
+          sessionId={sessionId}
+          isStreaming={isStreamingActive}
+        />
+      )),
+    [stableMessages, sessionId, isStreamingActive],
+  );
+
+  const streamingItem = useMemo(
+    () =>
+      deferredStreamingMessage ? (
+        <MessageParts
+          key={deferredStreamingMessage.id}
+          message={deferredStreamingMessage}
+          isComplete={false}
+          renderToolPart={renderToolPart}
+          sessionId={sessionId}
+          isStreaming
+        />
+      ) : null,
+    [deferredStreamingMessage, sessionId],
+  );
+
+  const items = useMemo(
+    () => (streamingItem ? [...stableItems, streamingItem] : stableItems),
+    [stableItems, streamingItem],
+  );
+
+  return (
+    <Conversation contextRef={contextRef} items={items}>
+      <ConversationScrollButton />
+    </Conversation>
   );
 }

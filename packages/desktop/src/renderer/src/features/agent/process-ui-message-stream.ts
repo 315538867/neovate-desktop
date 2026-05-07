@@ -11,7 +11,7 @@
  * Everything between the switch cases is IDENTICAL to the AI SDK source.
  * Run `critique` against the original to verify after updating.
  */
-import { type FlexibleSchema, type ToolCall, validateTypes } from "@ai-sdk/provider-utils";
+import { type FlexibleSchema, validateTypes } from "@ai-sdk/provider-utils";
 import {
   getStaticToolName,
   isStaticToolUIPart,
@@ -21,135 +21,31 @@ import {
   type DataUIPart,
   type DynamicToolUIPart,
   type ErrorHandler,
-  type FinishReason,
   type ProviderMetadata,
   type ReasoningUIPart,
   type TextUIPart,
   type ToolUIPart,
-  type UIDataTypes,
   type UIMessage,
-  type UIMessageChunk,
   type UIMessagePart,
-  type UITools,
 } from "ai";
 
 import { mergeObjects } from "./merge-objects";
+import {
+  createStreamingUIMessageState,
+  type CustomContentUIPart,
+  type DataUIMessageChunk,
+  type ExtendedUIMessageChunk,
+  type InferUIMessageData,
+  type InferUIMessageMetadata,
+  type InferUIMessageToolCall,
+  type InferUIMessageTools,
+  isDataUIMessageChunk,
+  type StreamingUIMessageState,
+  type UIDataTypesToSchemas,
+} from "./ui-message-stream-types";
 
-// ── Types not exported from ai@6.0.145 ─────────────────────────────────────
-// Copied verbatim from AI SDK source: ai/packages/ai/src/ui/ui-messages.ts
-
-type ValueOf<
-  ObjectType,
-  ValueType extends keyof ObjectType = keyof ObjectType,
-> = ObjectType[ValueType];
-
-type InferUIMessageMetadata<T extends UIMessage> =
-  T extends UIMessage<infer METADATA> ? METADATA : unknown;
-
-type InferUIMessageData<T extends UIMessage> =
-  T extends UIMessage<unknown, infer DATA_TYPES> ? DATA_TYPES : UIDataTypes;
-
-type InferUIMessageTools<T extends UIMessage> =
-  T extends UIMessage<unknown, UIDataTypes, infer TOOLS> ? TOOLS : UITools;
-
-type InferUIMessageToolCall<UI_MESSAGE extends UIMessage> =
-  | ValueOf<{
-      [NAME in keyof InferUIMessageTools<UI_MESSAGE>]: ToolCall<
-        NAME & string,
-        InferUIMessageTools<UI_MESSAGE>[NAME] extends { input: infer INPUT } ? INPUT : never
-      > & { dynamic?: false };
-    }>
-  | (ToolCall<string, unknown> & { dynamic: true });
-
-// Copied from AI SDK source: ai/packages/ai/src/ui-message-stream/ui-message-chunks.ts
-type DataUIMessageChunk<DATA_TYPES extends UIDataTypes> = ValueOf<{
-  [NAME in keyof DATA_TYPES & string]: {
-    type: `data-${NAME}`;
-    id?: string;
-    data: DATA_TYPES[NAME];
-    transient?: boolean;
-  };
-}>;
-
-type UIDataTypesToSchemas<T extends UIDataTypes> = {
-  [K in keyof T]: FlexibleSchema<T[K]>;
-};
-
-// ── Not exported from ai package ────────────────────────────────────────────
-
-// ai/src/ui-message-stream/ui-message-chunks.ts
-function isDataUIMessageChunk(
-  chunk: ExtendedUIMessageChunk,
-): chunk is DataUIMessageChunk<Record<string, unknown>> {
-  return chunk.type.startsWith("data-");
-}
-
-// ai/src/ui/ui-messages.ts
-// In AI SDK head this is part of UIMessagePart union, but not in 6.0.145
-type CustomContentUIPart = {
-  type: "custom";
-  kind: string;
-  providerMetadata?: ProviderMetadata;
-};
-
-// Extended chunk type that includes chunk types present in AI SDK source head
-// but not yet in ai@6.0.145's UIMessageChunk union
-type ExtendedUIMessageChunk =
-  | UIMessageChunk
-  | {
-      type: "custom";
-      kind: string;
-      providerMetadata?: ProviderMetadata;
-    }
-  | {
-      type: "reasoning-file";
-      url: string;
-      mediaType: string;
-      providerMetadata?: ProviderMetadata;
-    };
-
-export type StreamingUIMessageState<UI_MESSAGE extends UIMessage> = {
-  message: UI_MESSAGE;
-  activeTextParts: Record<string, TextUIPart>;
-  activeReasoningParts: Record<string, ReasoningUIPart>;
-  partialToolCalls: Record<
-    string,
-    {
-      text: string;
-      index: number;
-      toolName: string;
-      dynamic?: boolean;
-      title?: string;
-    }
-  >;
-  finishReason?: FinishReason;
-};
-
-export function createStreamingUIMessageState<UI_MESSAGE extends UIMessage>({
-  lastMessage,
-  messageId,
-}: {
-  lastMessage: UI_MESSAGE | undefined;
-  messageId: string;
-}): StreamingUIMessageState<UI_MESSAGE> {
-  return {
-    message:
-      lastMessage?.role === "assistant"
-        ? lastMessage
-        : ({
-            id: messageId,
-            metadata: undefined,
-            role: "assistant",
-            parts: [] as UIMessagePart<
-              InferUIMessageData<UI_MESSAGE>,
-              InferUIMessageTools<UI_MESSAGE>
-            >[],
-          } as UI_MESSAGE),
-    activeTextParts: {},
-    activeReasoningParts: {},
-    partialToolCalls: {},
-  };
-}
+// Re-export for backward compatibility with existing callers (chat.ts, tests).
+export { createStreamingUIMessageState, type StreamingUIMessageState };
 
 export async function processUIMessageStream<UI_MESSAGE extends UIMessage>({
   chunk,

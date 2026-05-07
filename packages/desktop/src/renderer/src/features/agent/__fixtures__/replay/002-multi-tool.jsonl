@@ -1,0 +1,19 @@
+{"type":"start","messageId":"msg-002"}
+{"type":"start-step"}
+{"type":"text-start","id":"text-1"}
+{"type":"text-delta","id":"text-1","delta":"Let me check the file."}
+{"type":"text-end","id":"text-1"}
+{"type":"tool-input-available","toolCallId":"tool-1","toolName":"read","input":{"file_path":"/etc/hosts"}}
+{"type":"tool-output-available","toolCallId":"tool-1","output":{"content":"127.0.0.1 localhost"}}
+{"type":"finish-step"}
+{"type":"start-step"}
+{"type":"tool-input-available","toolCallId":"tool-2","toolName":"grep","input":{"pattern":"localhost","path":"/etc/hosts"}}
+{"type":"tool-output-available","toolCallId":"tool-2","output":{"matches":["127.0.0.1 localhost"]}}
+{"type":"finish-step"}
+{"type":"start-step"}
+{"type":"text-start","id":"text-2"}
+{"type":"text-delta","id":"text-2","delta":"The hosts file maps "}
+{"type":"text-delta","id":"text-2","delta":"127.0.0.1 to localhost."}
+{"type":"text-end","id":"text-2"}
+{"type":"finish-step"}
+{"type":"finish"}

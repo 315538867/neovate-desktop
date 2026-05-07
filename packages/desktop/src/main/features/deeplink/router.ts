@@ -1,10 +1,10 @@
-import { implement } from "@orpc/server";
-
-import type { AppContext } from "../../router";
-
 import { deeplinkContract } from "../../../shared/features/deeplink/contract";
+import { defineRouter } from "../../core/router-factory";
 
-const os = implement({ deeplink: deeplinkContract }).$context<AppContext>();
+const { os } = defineRouter({
+  contract: { deeplink: deeplinkContract },
+  debugNs: "neovate:deeplink",
+});
 
 export const deeplinkRouter = os.deeplink.router({
   subscribe: os.deeplink.subscribe.handler(async function* ({ context, signal }) {
@@ -22,5 +22,19 @@ export const deeplinkRouter = os.deeplink.router({
     for await (const event of iterator) {
       yield event;
     }
+  }),
+
+  subscribeConfirmRequest: os.deeplink.subscribeConfirmRequest.handler(async function* ({
+    context,
+    signal,
+  }) {
+    const bus = context.mainApp.deeplinkConfirmBus;
+    for await (const event of bus.publisher.subscribe("confirm", { signal })) {
+      yield event;
+    }
+  }),
+
+  respondConfirmRequest: os.deeplink.respondConfirmRequest.handler(({ input, context }) => {
+    context.mainApp.deeplinkConfirmBus.respond(input.requestId, input.approved);
   }),
 });

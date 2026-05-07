@@ -133,6 +133,7 @@ export function AppLayoutTrafficLights() {
     client.electron.window
       .isFullScreen()
       .then(setIsFullScreen)
+      // noop: initial full-screen probe; on failure default `false` is correct
       .catch(() => {});
     // 监听全屏状态变化
     const unsubscribe = window.api.onFullScreenChange(setIsFullScreen);

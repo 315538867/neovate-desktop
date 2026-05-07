@@ -39,7 +39,6 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
   readonly #transport: ClaudeCodeChatTransport;
   readonly #state: ClaudeCodeChatState;
   #streamingState: StreamingUIMessageState<ClaudeCodeUIMessage> | null = null;
-  #messageIndex = -1;
   #flushHandle: number | null = null;
   #pendingFlush = false;
 
@@ -126,12 +125,11 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
   #flushStreaming = () => {
     if (!this.#pendingFlush || !this.#streamingState) return;
     this.#pendingFlush = false;
-    if (this.#messageIndex < 0) {
-      this.#state.pushMessage(this.#streamingState.message);
-      this.#messageIndex = this.#state.messages.length - 1;
-    } else {
-      this.#state.replaceMessage(this.#messageIndex, this.#streamingState.message);
-    }
+    // Single setter — chat-state routes the assistant message into the
+    // dedicated streaming slot, leaving stableMessages reference untouched
+    // so memoized list components can skip reconciles. The committed
+    // position is decided by commitStreamingMessage on `finish`.
+    this.#state.setStreamingMessage(this.#streamingState.message);
   };
 
   #cancelFlush = () => {
@@ -193,7 +191,6 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
           lastMessage: undefined,
           messageId: this.generateId(),
         });
-        this.#messageIndex = -1;
         this.#state.status = "streaming";
       }
       if (this.#streamingState) {
@@ -212,6 +209,10 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
         // before nulling streamingState — otherwise the final delta is dropped.
         this.#cancelFlush();
         this.#flushStreaming();
+        // Promote the streaming slot into stableMessages — frees the
+        // streamingMessage subscription and lets the new entry participate
+        // in stable-list memoization on the next turn.
+        this.#state.commitStreamingMessage();
         this.#streamingState = null;
         // Don't overwrite error status — if onError was called, keep error state
         if (this.#state.status !== "error") {

@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../../../orpc", () => ({ client: {} }));
+vi.mock("../../../../orpc", () => ({ client: { agent: { session: {} } } }));
 vi.mock("../../../../core/app", () => ({
   useRendererApp: () => ({ opener: { open: vi.fn() } }),
 }));

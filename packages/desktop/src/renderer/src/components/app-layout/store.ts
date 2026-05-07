@@ -101,6 +101,7 @@ const layoutStore = createStore<LayoutStore>()(
           // Expand window first, then open panel into the available space
           const minWidth = computeMinWindowWidthWithPanel(panels, id);
           log("expand panel, ensure min width", { id, minWidth });
+          // noop: best-effort window resize; OS may decline (e.g. user dragging) — UX is unaffected
           await client.window.ensureWidth({ minWidth }).catch(() => {});
 
           // Re-check: panel may have been toggled again during await
@@ -155,6 +156,7 @@ const layoutStore = createStore<LayoutStore>()(
           if (wasCollapsed) {
             const minWidth = computeMinWindowWidthWithPanel(panels, "secondarySidebar");
             log("secondary sidebar expanding, ensure min width", { minWidth });
+            // noop: best-effort window resize; OS may decline — sidebar still opens
             await client.window.ensureWidth({ minWidth }).catch(() => {});
             windowWidth = Math.max(window.innerWidth, minWidth);
           }

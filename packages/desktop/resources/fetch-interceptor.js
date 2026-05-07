@@ -3,17 +3,49 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 
 // src/main/features/agent/interceptor/credential-mask.ts
-var SENSITIVE_HEADERS = new Set(["x-api-key", "authorization"]);
+var SENSITIVE_HEADERS = new Set([
+  "authorization",
+  "proxy-authorization",
+  "x-api-key",
+  "api-key",
+  "x-auth-token",
+  "x-goog-api-key",
+  "cookie",
+  "set-cookie",
+  "openai-organization",
+  "x-organization"
+]);
+var SENSITIVE_QUERY_PARAMS = new Set([
+  "key",
+  "api_key",
+  "apikey",
+  "access_token",
+  "token",
+  "auth",
+  "password"
+]);
+var CREDENTIAL_PATTERNS = [
+  /\bsk-[A-Za-z0-9_-]{20,}\b/g,
+  /\bAIza[0-9A-Za-z_-]{30,}\b/g,
+  /\bgh[pousr]_[A-Za-z0-9]{30,}\b/g,
+  /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g
+];
 function maskCredential(value) {
+  if (!value)
+    return value;
   if (value.startsWith("Bearer ")) {
     return `Bearer ${maskCredential(value.slice(7))}`;
   }
-  if (value.startsWith("sk-")) {
-    const prefix = value.slice(0, 6);
-    const suffix = value.slice(-3);
-    return `${prefix}****${suffix}`;
+  if (value.length < 12) {
+    return "****";
   }
-  return value;
+  if (value.startsWith("sk-")) {
+    return `${value.slice(0, 6)}****${value.slice(-3)}`;
+  }
+  if (value.startsWith("AIza")) {
+    return `${value.slice(0, 6)}****${value.slice(-3)}`;
+  }
+  return `${value.slice(0, 4)}****${value.slice(-3)}`;
 }
 function maskHeaders(headers) {
   const masked = {};
@@ -21,6 +53,66 @@ function maskHeaders(headers) {
     masked[key] = SENSITIVE_HEADERS.has(key.toLowerCase()) ? maskCredential(val) : val;
   }
   return masked;
+}
+function maskUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return maskCredentialsInString(url);
+  }
+  let mutated = false;
+  for (const [key, value] of parsed.searchParams) {
+    if (SENSITIVE_QUERY_PARAMS.has(key.toLowerCase())) {
+      parsed.searchParams.set(key, maskCredential(value));
+      mutated = true;
+    }
+  }
+  return mutated ? parsed.toString() : url;
+}
+function maskCredentialsInString(text) {
+  let out = text;
+  for (const pattern of CREDENTIAL_PATTERNS) {
+    out = out.replace(pattern, (match) => maskCredential(match));
+  }
+  return out;
+}
+function maskCredentialsInValue(value) {
+  return walk(value);
+}
+var SENSITIVE_KEY_HINTS = [
+  "apikey",
+  "api_key",
+  "accesstoken",
+  "access_token",
+  "authtoken",
+  "auth_token",
+  "authorization",
+  "password",
+  "secret",
+  "token"
+];
+function isSensitiveKey(key) {
+  const lower = key.toLowerCase();
+  return SENSITIVE_KEY_HINTS.some((hint) => lower === hint || lower.endsWith(hint));
+}
+function walk(value) {
+  if (typeof value === "string") {
+    return maskCredentialsInString(value);
+  }
+  if (!value || typeof value !== "object")
+    return value;
+  if (Array.isArray(value))
+    return value.map(walk);
+  const out = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (typeof v === "string" && isSensitiveKey(k)) {
+      out[k] = maskCredential(v);
+    } else {
+      out[k] = walk(v);
+    }
+  }
+  return out;
 }
 
 // src/main/features/agent/interceptor/stream-assembler.ts
@@ -335,7 +427,9 @@ function setup() {
     dlog("intercept: %s %s id=%s", method, url, id);
     const rawHeaders = extractHeaders(init);
     const maskedHdrs = maskHeaders(rawHeaders);
+    const maskedUrl = maskUrl(url);
     const rawBody = typeof init?.body === "string" ? init.body : "";
+    const maskedBody = rawBody ? maskCredentialsInString(rawBody) : "";
     let parsed = null;
     try {
       if (rawBody)
@@ -344,7 +438,7 @@ function setup() {
     const summaryBase = {
       id,
       sessionId,
-      url,
+      url: maskedUrl,
       method,
       model: parsed?.model,
       isStream: parsed?.stream === true,
@@ -369,7 +463,7 @@ function setup() {
         duration,
         error: err?.message ?? "fetch failed",
         detail: {
-          request: { headers: maskedHdrs, rawBody }
+          request: { headers: maskedHdrs, rawBody: maskedBody }
         }
       });
       throw err;
@@ -378,13 +472,14 @@ function setup() {
     response.headers.forEach((v, k) => {
       respHeaders[k] = v;
     });
+    const maskedRespHeaders = maskHeaders(respHeaders);
     dlog("response: id=%s status=%d stream=%s", id, response.status, !!(parsed?.stream && response.body));
     if (parsed?.stream && response.body && response.ok) {
-      return handleStreamResponse(response, id, summaryBase, maskedHdrs, rawBody, respHeaders, startTime);
+      return handleStreamResponse(response, id, summaryBase, maskedHdrs, maskedBody, maskedRespHeaders, startTime);
     }
-    return handleNonStreamResponse(response, id, summaryBase, maskedHdrs, rawBody, respHeaders, startTime);
+    return handleNonStreamResponse(response, id, summaryBase, maskedHdrs, maskedBody, maskedRespHeaders, startTime);
   };
-  function handleStreamResponse(response, _id, summaryBase, maskedHdrs, rawBody, respHeaders, startTime) {
+  function handleStreamResponse(response, _id, summaryBase, maskedHdrs, maskedBody, respHeaders, startTime) {
     dlog("stream start: id=%s", summaryBase.id);
     const assembler = new StreamAssembler;
     let streamedContent = "";
@@ -422,8 +517,8 @@ function setup() {
               } : undefined,
               contentBlockTypes,
               detail: {
-                request: { headers: maskedHdrs, rawBody },
-                response: { headers: respHeaders, body: assembled }
+                request: { headers: maskedHdrs, rawBody: maskedBody },
+                response: { headers: respHeaders, body: maskCredentialsInValue(assembled) }
               }
             });
             return;
@@ -444,7 +539,7 @@ function setup() {
       headers: response.headers
     });
   }
-  async function handleNonStreamResponse(response, _id, summaryBase, maskedHdrs, rawBody, respHeaders, startTime) {
+  async function handleNonStreamResponse(response, _id, summaryBase, maskedHdrs, maskedBody, respHeaders, startTime) {
     const cloned = response.clone();
     let respBody;
     try {
@@ -475,8 +570,8 @@ function setup() {
         cacheCreationInputTokens: usage.cache_creation_input_tokens
       } : undefined,
       detail: {
-        request: { headers: maskedHdrs, rawBody },
-        response: { headers: respHeaders, body: respBody }
+        request: { headers: maskedHdrs, rawBody: maskedBody },
+        response: { headers: respHeaders, body: maskCredentialsInValue(respBody) }
       }
     });
     return response;

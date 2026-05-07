@@ -194,6 +194,7 @@ export class UpdaterService implements IUpdateService {
     if (manual) {
       this.setState({ status: "checking" });
     }
+    // noop: errors are surfaced via autoUpdater 'error' event handler instead
     autoUpdater.checkForUpdates().catch(() => {});
     this.checkTimeout = setTimeout(() => {
       log("check timed out");
@@ -263,6 +264,7 @@ export class UpdaterService implements IUpdateService {
       if (this.surfaceUI || this._state.status === "error") {
         this.setState({ status: "downloading", version: info.version, percent: 0 });
       }
+      // noop: errors are surfaced via autoUpdater 'error' event handler instead
       autoUpdater.downloadUpdate().catch(() => {});
     });
 

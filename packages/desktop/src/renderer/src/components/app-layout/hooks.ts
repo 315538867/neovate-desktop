@@ -19,6 +19,7 @@ function useSyncWindowMinWidth() {
         timer = setTimeout(() => {
           const required = computeMinWindowWidth(panels);
           log("sync window min width", { required });
+          // noop: best-effort sync of OS window min-width; failure has no UX impact
           void client.window.ensureWidth({ minWidth: required }).catch(() => {});
         }, 100);
       },

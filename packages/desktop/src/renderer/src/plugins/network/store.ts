@@ -135,8 +135,8 @@ export const useNetworkStore = create<NetworkState>()(
       log("loadSession: %s", sessionId);
       try {
         const [inspectorState, summaries] = await Promise.all([
-          client.agent.network.getInspectorState({ sessionId }),
-          client.agent.network.listRequests({ sessionId }),
+          client.agent.session.network.getInspectorState({ sessionId }),
+          client.agent.session.network.listRequests({ sessionId }),
         ]);
 
         set((state) => {
@@ -197,7 +197,7 @@ export const useNetworkStore = create<NetworkState>()(
 
     clear: (sessionId) => {
       log("clear: %s", sessionId);
-      client.agent.network.clearRequests({ sessionId }).catch((err: unknown) => {
+      client.agent.session.network.clearRequests({ sessionId }).catch((err: unknown) => {
         log("clear: error %o", err);
       });
       set((state) => {

@@ -40,7 +40,7 @@ export default function NetworkView() {
 
     async function subscribe() {
       try {
-        const iter = await client.agent.network.subscribe({ sessionId: activeSessionId! });
+        const iter = await client.agent.session.network.subscribe({ sessionId: activeSessionId! });
         for await (const summary of iter) {
           if (cancelled) break;
           onSummary(summary);
@@ -64,7 +64,7 @@ export default function NetworkView() {
 
     async function fetchDetail() {
       try {
-        const detail = await client.agent.network.getRequestDetail({
+        const detail = await client.agent.session.network.getRequestDetail({
           sessionId: activeSessionId!,
           requestId: selectedRequestId!,
         });

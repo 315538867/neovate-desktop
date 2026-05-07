@@ -1,11 +1,4 @@
-import type { SDKMessage, SDKPartialAssistantMessage } from "@anthropic-ai/claude-agent-sdk";
-import type {
-  BetaRawContentBlockDeltaEvent,
-  BetaRawContentBlockStartEvent,
-  BetaRawContentBlockStopEvent,
-  BetaRawMessageStartEvent,
-  BetaToolUseBlock,
-} from "@anthropic-ai/sdk/resources/beta/messages/messages.mjs";
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import { createUIMessageStream, readUIMessageStream } from "ai";
 
@@ -15,133 +8,37 @@ import type {
   ClaudeCodeUIEvent,
 } from "../../../shared/claude-code/types";
 
-import { parseCliUserContent } from "../../../shared/claude-code/parse-cli-user-content";
-import { EditOutputSchema } from "../../../shared/claude-code/tools/edit";
-import { ReadOutputSchema } from "../../../shared/claude-code/tools/read";
-
-type ActiveContentBlock =
-  | { type: "text"; id: string }
-  | { type: "reasoning"; id: string }
-  | {
-      type: "tool-call";
-      toolCallId: string;
-      toolName: string;
-      input: string;
-      providerExecuted: true;
-      providerMetadata?: ReturnType<SDKMessageTransformer["claudeCodeMetadata"]>;
-    };
+import {
+  type AggregatorContext,
+  type ParentToolState,
+  transformWithAggregation as runWithAggregation,
+} from "./transformer/agent-aggregator";
+import {
+  claudeCodeMetadata,
+  emitParsedUserText,
+  isTopLevelParent,
+} from "./transformer/parts-builder";
+import {
+  type ActiveContentBlock,
+  createStreamState,
+  type StreamHandlerContext,
+  type StreamState,
+  transformStreamEvent as runTransformStreamEvent,
+} from "./transformer/stream-handlers";
+import {
+  CONTENT_OUTPUT_TOOL_NAMES,
+  contentToOutputSchema,
+} from "./transformer/tool-output-fallback";
+import { isSyntheticUserMessage } from "./transformer/type-guards";
 
 type SDKMessageTransformerOptions = {
   rootParentToolUseId?: string | null;
   rootToolPrompt?: string | null;
 };
 
-type ParentToolState = {
-  toolName: "Task" | "Agent";
-  prompt?: string;
-  childMessages: SDKMessage[];
-  latestMessage?: ClaudeCodeUIMessage;
-};
-
-function isTaskOrAgentTool(toolName: string): toolName is "Task" | "Agent" {
-  return toolName === "Task" || toolName === "Agent";
-}
-
-/** Predefined tools whose output should use raw content instead of tool_use_result. */
-const CONTENT_OUTPUT_TOOL_NAMES = new Set([
-  "Agent",
-  "Task",
-  "Bash",
-  "Write",
-  "MultiEdit",
-  "Glob",
-  "Grep",
-  "WebFetch",
-  "WebSearch",
-  "TodoWrite",
-  "NotebookEdit",
-  "BashOutput",
-  "Skill",
-  "SlashCommand",
-  "EnterPlanMode",
-  "ExitPlanMode",
-  "EnterWorktree",
-  "TaskOutput",
-  "TaskStop",
-]);
-
-/**
- * Content → outputSchema fallback converter entry.
- *
- * On restore, `getSessionMessages` strips `tool_use_result`, so the transformer
- * falls back to the Anthropic API `content` field. Each tool that uses
- * `tool_use_result` (i.e. NOT in CONTENT_OUTPUT_TOOL_NAMES) should register a
- * converter here to transform content into its outputSchema format.
- *
- * The converter output is validated against the schema via `safeParse`.
- * If validation fails, `undefined` is returned (tool renders with no output).
- */
-type ContentFallbackConverter = {
-  schema: { safeParse: (data: unknown) => { success: boolean; data?: unknown } };
-  convert: (content: unknown) => unknown;
-};
-
-const CONTENT_FALLBACK_CONVERTERS: Record<string, ContentFallbackConverter> = {
-  Edit: {
-    schema: EditOutputSchema,
-    convert(content) {
-      // On restore, content is a raw string (the CLI's text output).
-      // We can't reconstruct structuredPatch from it, so return the content
-      // as-is and let safeParse reject it — EditTool gracefully falls back
-      // to input.old_string / input.new_string when output is undefined.
-      return content;
-    },
-  },
-  Read: {
-    schema: ReadOutputSchema,
-    convert(content) {
-      if (typeof content === "string") {
-        const totalLines = content.split("\n").length;
-        return {
-          type: "text",
-          file: { filePath: "", content, numLines: totalLines, startLine: 1, totalLines },
-        };
-      }
-      if (!Array.isArray(content)) return content;
-
-      for (const block of content) {
-        if (block?.type === "image" && block.source?.type === "base64") {
-          return {
-            type: "image",
-            file: {
-              base64: block.source.data ?? "",
-              type: block.source.media_type ?? "image/png",
-              originalSize: 0,
-            },
-          };
-        }
-      }
-
-      const text = content
-        .filter((b: any) => b?.type === "text" && typeof b.text === "string")
-        .map((b: any) => b.text)
-        .join("\n");
-      const totalLines = text.split("\n").length;
-      return {
-        type: "text",
-        file: { filePath: "", content: text, numLines: totalLines, startLine: 1, totalLines },
-      };
-    },
-  },
-};
-
 export class SDKMessageTransformer {
-  private inStep = false;
-  private hasStarted = false;
-  private currentMessageId: string | null = null;
-  private activeStreamedMessageId: string | null = null;
-  private currentParentToolUseId: string | null = null;
-  private currentStreamHasUnsupportedBlocks = false;
+  /** Mutable scalar state shared with `transformer/stream-handlers`. */
+  private readonly streamState: StreamState = createStreamState();
   private readonly completedStreamedAssistantMessageIds = new Set<string>();
   // Narrow dedupe state for Agent kickoff prompts only.
   // We intentionally do not scan prior messages or do fuzzy matching here.
@@ -164,12 +61,12 @@ export class SDKMessageTransformer {
     switch (msg.type) {
       case "system": {
         if (msg.subtype === "init") {
-          this.inStep = false;
-          this.hasStarted = true;
-          this.currentMessageId = null;
-          this.activeStreamedMessageId = null;
-          this.currentParentToolUseId = null;
-          this.currentStreamHasUnsupportedBlocks = false;
+          this.streamState.inStep = false;
+          this.streamState.hasStarted = true;
+          this.streamState.currentMessageId = null;
+          this.streamState.activeStreamedMessageId = null;
+          this.streamState.currentParentToolUseId = null;
+          this.streamState.currentStreamHasUnsupportedBlocks = false;
           this.agentToolPrompts.clear();
           this.activeParentTools.clear();
           yield {
@@ -185,23 +82,23 @@ export class SDKMessageTransformer {
       }
 
       case "assistant": {
-        if (msg.message.id === this.activeStreamedMessageId) {
+        if (msg.message.id === this.streamState.activeStreamedMessageId) {
           break;
         }
         if (this.completedStreamedAssistantMessageIds.has(msg.message.id)) {
           break;
         }
-        if (!this.hasStarted) {
-          this.hasStarted = true;
+        if (!this.streamState.hasStarted) {
+          this.streamState.hasStarted = true;
           yield { type: "start", messageId: msg.message.id };
         }
-        if (this.isTopLevelParent(msg.parent_tool_use_id)) {
-          const isNewStep = msg.message.id !== this.currentMessageId;
+        if (isTopLevelParent(msg.parent_tool_use_id, this.rootParentToolUseId)) {
+          const isNewStep = msg.message.id !== this.streamState.currentMessageId;
           if (isNewStep) {
-            if (this.inStep) yield { type: "finish-step" };
+            if (this.streamState.inStep) yield { type: "finish-step" };
             yield { type: "start-step" };
-            this.inStep = true;
-            this.currentMessageId = msg.message.id;
+            this.streamState.inStep = true;
+            this.streamState.currentMessageId = msg.message.id;
           }
         }
         yield* this.transformAssistant(msg);
@@ -210,18 +107,18 @@ export class SDKMessageTransformer {
 
       case "user": {
         // Skip synthetic messages injected by the SDK (e.g. skill prompt expansions)
-        if ("isSynthetic" in msg && msg.isSynthetic) break;
+        if (isSyntheticUserMessage(msg)) break;
         yield* this.transformUser(msg);
         break;
       }
 
       case "stream_event": {
-        yield* this.transformStreamEvent(msg);
+        yield* runTransformStreamEvent(this.streamHandlerContext(), msg);
         break;
       }
 
       case "result": {
-        if (this.inStep) yield { type: "finish-step" };
+        if (this.streamState.inStep) yield { type: "finish-step" };
 
         // aborted_streaming: user sent a new message while the previous turn was still
         // streaming — the SDK aborts the in-flight response. This is expected, not an error.
@@ -239,11 +136,11 @@ export class SDKMessageTransformer {
         yield { type: `data-result/${msg.subtype}`, data: msg } as ClaudeCodeUIMessageChunk;
         yield { type: "finish" };
 
-        this.inStep = false;
-        this.currentMessageId = null;
-        this.activeStreamedMessageId = null;
-        this.currentParentToolUseId = null;
-        this.currentStreamHasUnsupportedBlocks = false;
+        this.streamState.inStep = false;
+        this.streamState.currentMessageId = null;
+        this.streamState.activeStreamedMessageId = null;
+        this.streamState.currentParentToolUseId = null;
+        this.streamState.currentStreamHasUnsupportedBlocks = false;
         this.agentToolPrompts.clear();
         this.contentBlocks.clear();
         this.activeParentTools.clear();
@@ -253,395 +150,45 @@ export class SDKMessageTransformer {
   }
 
   async *transformWithAggregation(msg: SDKMessage): AsyncGenerator<ClaudeCodeUIMessageChunk> {
-    const parentToolUseId = "parent_tool_use_id" in msg ? msg.parent_tool_use_id : null;
-
-    if (parentToolUseId != null && this.activeParentTools.has(parentToolUseId)) {
-      yield* this.handleChildMessage(parentToolUseId, msg);
-      return;
-    }
-
-    const parentToolResults = this.parentToolResultsForMessage(msg);
-    for (const chunk of this.transform(msg)) {
-      if (chunk.type === "tool-input-available" && isTaskOrAgentTool(chunk.toolName)) {
-        this.activeParentTools.set(chunk.toolCallId, {
-          toolName: chunk.toolName,
-          prompt: this.extractToolPrompt(chunk.input),
-          childMessages: [],
-        });
-        yield chunk;
-        continue;
-      }
-
-      if (
-        (chunk.type === "tool-output-available" || chunk.type === "tool-output-error") &&
-        parentToolResults.has(chunk.toolCallId)
-      ) {
-        const state = this.activeParentTools.get(chunk.toolCallId);
-        const toolResult = parentToolResults.get(chunk.toolCallId);
-        if (state == null || toolResult == null) {
-          yield chunk;
-          continue;
-        }
-
-        if (toolResult.is_error) {
-          yield {
-            type: "tool-output-error",
-            toolCallId: chunk.toolCallId,
-            errorText: this.resultContentToText(toolResult.content, true),
-            providerExecuted: true,
-          };
-        } else {
-          state.latestMessage = this.finalizeAgentMessage({
-            toolCallId: chunk.toolCallId,
-            sessionId: msg.session_id ?? "",
-            baseMessage: state.latestMessage,
-            result: toolResult.content,
-            isError: false,
-          });
-
-          yield {
-            type: "tool-output-available",
-            toolCallId: chunk.toolCallId,
-            output: state.latestMessage,
-            providerExecuted: true,
-            preliminary: false,
-          };
-        }
-        this.activeParentTools.delete(chunk.toolCallId);
-        continue;
-      }
-
-      yield chunk;
-    }
+    yield* runWithAggregation(this.aggregatorContext(), msg);
   }
 
-  private async *handleChildMessage(
-    parentToolUseId: string,
-    msg: SDKMessage,
-  ): AsyncGenerator<ClaudeCodeUIMessageChunk> {
-    const state = this.activeParentTools.get(parentToolUseId);
-    if (state == null) {
-      return;
-    }
-
-    state.childMessages.push(msg);
-    state.latestMessage = await materializeSDKMessagesToUIMessage(state.childMessages, {
-      transformer: new SDKMessageTransformer({
-        rootParentToolUseId: parentToolUseId,
-        rootToolPrompt: state.prompt ?? null,
-      }),
-    });
-
-    if (state.latestMessage == null) {
-      return;
-    }
-
-    yield {
-      type: "tool-output-available",
-      toolCallId: parentToolUseId,
-      output: state.latestMessage,
-      providerExecuted: true,
-      preliminary: true,
+  /**
+   * Bundle the parent-transformer state the aggregator needs. Created
+   * fresh on every call (cheap object literal); the underlying state map
+   * is shared by reference so accumulation across messages is preserved.
+   */
+  private aggregatorContext(): AggregatorContext {
+    return {
+      activeParentTools: this.activeParentTools,
+      transform: (m) => this.transform(m),
+      materializeChild: (childMessages, parentToolUseId, prompt) =>
+        materializeSDKMessagesToUIMessage(childMessages, {
+          transformer: new SDKMessageTransformer({
+            rootParentToolUseId: parentToolUseId,
+            rootToolPrompt: prompt,
+          }),
+        }),
     };
   }
 
-  private parentToolResultsForMessage(msg: SDKMessage) {
-    const parentToolResults = new Map<string, { content: unknown; is_error: boolean }>();
-
-    if (msg.type !== "user" || !Array.isArray(msg.message.content)) {
-      return parentToolResults;
-    }
-
-    for (const part of msg.message.content) {
-      if (part.type !== "tool_result") continue;
-      if (!this.activeParentTools.has(part.tool_use_id)) continue;
-      parentToolResults.set(part.tool_use_id, {
-        content: part.content,
-        is_error: part.is_error === true,
-      });
-    }
-
-    return parentToolResults;
-  }
-
-  private extractToolPrompt(input: unknown) {
-    if (
-      input != null &&
-      typeof input === "object" &&
-      "prompt" in input &&
-      typeof input.prompt === "string"
-    ) {
-      return input.prompt;
-    }
-
-    return undefined;
-  }
-
-  private *transformStreamEvent(
-    msg: SDKPartialAssistantMessage,
-  ): Generator<ClaudeCodeUIMessageChunk> {
-    switch (msg.event.type) {
-      case "message_start": {
-        yield* this.handleMessageStart(msg, msg.event as BetaRawMessageStartEvent);
-        break;
-      }
-
-      case "content_block_start": {
-        yield* this.handleContentBlockStart(msg.event);
-        break;
-      }
-
-      case "content_block_delta": {
-        yield* this.handleContentBlockDelta(msg.event);
-        break;
-      }
-
-      case "content_block_stop": {
-        yield* this.handleContentBlockStop(msg.event);
-        break;
-      }
-
-      case "message_stop": {
-        yield* this.handleMessageStop();
-        break;
-      }
-
-      case "message_delta": {
-        break;
-      }
-    }
-  }
-
-  // oxlint-disable-next-line require-yield -- caller uses yield*; keeping as generator for symmetry with sibling handlers
-  private *handleMessageStop(): Generator<ClaudeCodeUIMessageChunk> {
-    if (this.currentMessageId != null && !this.currentStreamHasUnsupportedBlocks) {
-      this.completedStreamedAssistantMessageIds.add(this.currentMessageId);
-    }
-    this.activeStreamedMessageId = null;
-  }
-
-  private *handleMessageStart(
-    msg: SDKPartialAssistantMessage,
-    event: BetaRawMessageStartEvent,
-  ): Generator<ClaudeCodeUIMessageChunk> {
-    if (!this.hasStarted) {
-      this.hasStarted = true;
-      yield {
-        type: "start",
-        messageId: event.message.id,
-        messageMetadata: {
-          sessionId: msg.session_id ?? "",
-          parentToolUseId: this.isTopLevelParent(msg.parent_tool_use_id)
-            ? null
-            : msg.parent_tool_use_id,
-        },
-      };
-    }
-
-    const isNewStep = event.message.id !== this.currentMessageId;
-    if (isNewStep && this.isTopLevelParent(msg.parent_tool_use_id)) {
-      if (this.inStep) {
-        yield { type: "finish-step" };
-      }
-      yield { type: "start-step" };
-      this.inStep = true;
-      this.currentMessageId = event.message.id;
-      this.contentBlocks.clear();
-    }
-
-    this.currentParentToolUseId = this.isTopLevelParent(msg.parent_tool_use_id)
-      ? null
-      : msg.parent_tool_use_id;
-    this.currentStreamHasUnsupportedBlocks = false;
-    this.activeStreamedMessageId = event.message.id;
-  }
-
-  private *handleContentBlockStart(
-    event: BetaRawContentBlockStartEvent,
-  ): Generator<ClaudeCodeUIMessageChunk> {
-    if (this.currentMessageId == null || this.contentBlocks.has(event.index)) {
-      return;
-    }
-
-    switch (event.content_block.type) {
-      case "text": {
-        const partId = this.textPartId(this.currentMessageId, event.index);
-        this.contentBlocks.set(event.index, { type: "text", id: partId });
-        yield { type: "text-start", id: partId };
-        return;
-      }
-
-      case "thinking": {
-        const partId = this.reasoningPartId(this.currentMessageId, event.index);
-        this.contentBlocks.set(event.index, { type: "reasoning", id: partId });
-        yield { type: "reasoning-start", id: partId };
-        return;
-      }
-
-      case "redacted_thinking": {
-        const partId = this.reasoningPartId(this.currentMessageId, event.index);
-        this.contentBlocks.set(event.index, { type: "reasoning", id: partId });
-        yield {
-          type: "reasoning-start",
-          id: partId,
-          providerMetadata: { anthropic: { redactedData: event.content_block.data } },
-        };
-        return;
-      }
-
-      case "tool_use": {
-        yield* this.handleToolUseBlockStart(event.content_block, event.index);
-        return;
-      }
-
-      default: {
-        this.currentStreamHasUnsupportedBlocks = true;
-        return;
-      }
-    }
-  }
-
-  private *handleToolUseBlockStart(
-    contentBlock: BetaToolUseBlock,
-    index: number,
-  ): Generator<ClaudeCodeUIMessageChunk> {
-    const initialInput =
-      contentBlock.input != null &&
-      typeof contentBlock.input === "object" &&
-      Object.keys(contentBlock.input).length > 0
-        ? JSON.stringify(contentBlock.input)
-        : "";
-
-    const providerMetadata = this.claudeCodeMetadata(this.currentParentToolUseId);
-    this.contentBlocks.set(index, {
-      type: "tool-call",
-      toolCallId: contentBlock.id,
-      toolName: contentBlock.name,
-      input: initialInput,
-      providerExecuted: true,
-      ...(providerMetadata != null ? { providerMetadata } : {}),
-    });
-
-    yield {
-      type: "tool-input-start",
-      toolCallId: contentBlock.id,
-      toolName: contentBlock.name,
-      providerExecuted: true,
-      ...(providerMetadata != null ? { providerMetadata } : {}),
+  /**
+   * Bundle the streaming-state and Set/Map references the stream-handlers
+   * need. Created fresh on every dispatch (cheap object literal); the
+   * `state` object and Set/Map fields are shared by reference so handler
+   * mutations propagate back to the parent.
+   */
+  private streamHandlerContext(): StreamHandlerContext {
+    return {
+      state: this.streamState,
+      contentBlocks: this.contentBlocks,
+      completedStreamedAssistantMessageIds: this.completedStreamedAssistantMessageIds,
+      toolNames: this.toolNames,
+      contentOutputTools: this.contentOutputTools,
+      rootParentToolUseId: this.rootParentToolUseId,
+      rememberAgentToolPrompt: (toolCallId, toolName, input) =>
+        this.rememberAgentToolPrompt(toolCallId, toolName, input),
     };
-  }
-
-  private *handleContentBlockDelta(
-    event: BetaRawContentBlockDeltaEvent,
-  ): Generator<ClaudeCodeUIMessageChunk> {
-    const contentBlock = this.contentBlocks.get(event.index);
-    if (contentBlock == null) {
-      return;
-    }
-
-    switch (event.delta.type) {
-      case "text_delta": {
-        if (contentBlock.type !== "text" || event.delta.text.length === 0) {
-          return;
-        }
-
-        yield { type: "text-delta", id: contentBlock.id, delta: event.delta.text };
-        return;
-      }
-
-      case "thinking_delta": {
-        if (contentBlock.type !== "reasoning") {
-          return;
-        }
-
-        yield { type: "reasoning-delta", id: contentBlock.id, delta: event.delta.thinking };
-        return;
-      }
-
-      case "signature_delta": {
-        if (contentBlock.type !== "reasoning") {
-          return;
-        }
-
-        yield {
-          type: "reasoning-delta",
-          id: contentBlock.id,
-          delta: "",
-          providerMetadata: { anthropic: { signature: event.delta.signature } },
-        };
-        return;
-      }
-
-      case "input_json_delta": {
-        if (contentBlock.type !== "tool-call" || event.delta.partial_json.length === 0) {
-          return;
-        }
-
-        yield {
-          type: "tool-input-delta",
-          toolCallId: contentBlock.toolCallId,
-          inputTextDelta: event.delta.partial_json,
-        };
-        contentBlock.input += event.delta.partial_json;
-        return;
-      }
-    }
-  }
-
-  private *handleContentBlockStop(
-    event: BetaRawContentBlockStopEvent,
-  ): Generator<ClaudeCodeUIMessageChunk> {
-    const contentBlock = this.contentBlocks.get(event.index);
-    if (contentBlock == null) {
-      return;
-    }
-
-    this.contentBlocks.delete(event.index);
-    switch (contentBlock.type) {
-      case "text": {
-        yield { type: "text-end", id: contentBlock.id };
-        return;
-      }
-      case "reasoning": {
-        yield { type: "reasoning-end", id: contentBlock.id };
-        return;
-      }
-      case "tool-call": {
-        const finalInput = contentBlock.input === "" ? "{}" : contentBlock.input;
-
-        try {
-          const parsedInput = JSON.parse(finalInput);
-          this.rememberAgentToolPrompt(contentBlock.toolCallId, contentBlock.toolName, parsedInput);
-          this.toolNames.set(contentBlock.toolCallId, contentBlock.toolName);
-          if (CONTENT_OUTPUT_TOOL_NAMES.has(contentBlock.toolName)) {
-            this.contentOutputTools.add(contentBlock.toolCallId);
-          }
-          yield {
-            type: "tool-input-available",
-            toolCallId: contentBlock.toolCallId,
-            toolName: contentBlock.toolName,
-            input: parsedInput,
-            providerExecuted: contentBlock.providerExecuted,
-            ...(contentBlock.providerMetadata != null
-              ? { providerMetadata: contentBlock.providerMetadata }
-              : {}),
-          };
-        } catch (error) {
-          yield {
-            type: "tool-input-error",
-            toolCallId: contentBlock.toolCallId,
-            toolName: contentBlock.toolName,
-            input: finalInput,
-            errorText: error instanceof Error ? error.message : "Invalid tool input JSON",
-            providerExecuted: contentBlock.providerExecuted,
-            ...(contentBlock.providerMetadata != null
-              ? { providerMetadata: contentBlock.providerMetadata }
-              : {}),
-          };
-        }
-        return;
-      }
-    }
   }
 
   private *transformAssistant(
@@ -686,7 +233,7 @@ export class SDKMessageTransformer {
             toolName: part.name,
             input: part.input,
             providerExecuted: true,
-            providerMetadata: this.claudeCodeMetadata(msg.parent_tool_use_id),
+            providerMetadata: claudeCodeMetadata(msg.parent_tool_use_id, this.rootParentToolUseId),
           };
           break;
         }
@@ -695,8 +242,10 @@ export class SDKMessageTransformer {
   }
 
   private *transformUser(msg: SDKMessage & { type: "user" }): Generator<ClaudeCodeUIMessageChunk> {
-    const message = msg as any;
-    const content = message.message?.content;
+    const content = msg.message?.content;
+    // SDK types `uuid` as optional but the runtime always populates it; the
+    // empty-string fallback only guards against a malformed SDK payload.
+    const uuid = msg.uuid ?? "";
 
     // Translate the CLI's external XML envelope (slash commands) into our
     // internal domain events here, so the live-stream path mirrors the
@@ -706,7 +255,7 @@ export class SDKMessageTransformer {
       if (this.shouldSkipNestedPromptText(msg.parent_tool_use_id, content)) {
         return;
       }
-      yield* this.emitParsedUserText(content, message.uuid);
+      yield* emitParsedUserText(content, uuid);
       return;
     }
 
@@ -723,7 +272,7 @@ export class SDKMessageTransformer {
               providerExecuted: true,
             };
           } else {
-            const output = this.resolveToolOutput(part.tool_use_id, part.content, message);
+            const output = this.resolveToolOutput(part.tool_use_id, part.content, msg);
             yield {
               type: "tool-output-available",
               toolCallId: part.tool_use_id,
@@ -737,41 +286,11 @@ export class SDKMessageTransformer {
           if (this.shouldSkipNestedPromptText(msg.parent_tool_use_id, part.text)) {
             break;
           }
-          yield* this.emitParsedUserText(part.text, message.uuid);
+          yield* emitParsedUserText(part.text, uuid);
           break;
         }
       }
     }
-  }
-
-  /**
-   * Parse a raw user text payload through the CLI protocol→semantic translator
-   * and yield the corresponding chunks (text and/or `data-slash-command`).
-   * Empty input emits nothing — callers should pre-skip if they want a
-   * different fallback.
-   */
-  private *emitParsedUserText(text: string, uuid: string): Generator<ClaudeCodeUIMessageChunk> {
-    const parsed = parseCliUserContent(text);
-    if (parsed.parts.length === 0) return;
-    let counter = 0;
-    for (const part of parsed.parts) {
-      if (part.type === "data-slash-command") {
-        yield {
-          type: "data-slash-command",
-          id: `${uuid}-cmd-${counter++}`,
-          data: part.data,
-        };
-      } else if (part.type === "text") {
-        const textId = `${uuid}-text-${counter++}`;
-        yield { type: "text-start", id: textId };
-        yield { type: "text-delta", id: textId, delta: part.text };
-        yield { type: "text-end", id: textId };
-      }
-    }
-  }
-
-  private claudeCodeMetadata(parentToolUseId: string | null | undefined) {
-    return this.isTopLevelParent(parentToolUseId) ? undefined : { claudeCode: { parentToolUseId } };
   }
 
   // Claude Code emits both:
@@ -811,179 +330,31 @@ export class SDKMessageTransformer {
     return prompt != null && prompt === text;
   }
 
-  private isTopLevelParent(parentToolUseId: string | null | undefined) {
-    return parentToolUseId == null || parentToolUseId === this.rootParentToolUseId;
-  }
-
-  private finalizeAgentMessage({
-    toolCallId,
-    sessionId,
-    baseMessage,
-    result,
-    isError,
-  }: {
-    toolCallId: string;
-    sessionId: string;
-    baseMessage?: ClaudeCodeUIMessage;
-    result: unknown;
-    isError: boolean;
-  }): ClaudeCodeUIMessage {
-    const parts = [
-      ...(baseMessage?.parts ?? []),
-      ...this.resultContentToMessageParts(result, isError),
-    ];
-
-    return {
-      id: `agent:${toolCallId}`,
-      role: "assistant",
-      metadata: {
-        sessionId,
-        parentToolUseId: null,
-      },
-      parts,
-    } as ClaudeCodeUIMessage;
-  }
-
-  private resultContentToMessageParts(result: unknown, isError: boolean) {
-    const parts: ClaudeCodeUIMessage["parts"] = [];
-
-    // Handle image outputs
-    const imageParts = this.extractImageParts(result);
-    for (const imagePart of imageParts) {
-      parts.push(imagePart);
-    }
-
-    // Handle text outputs
-    const texts = this.resultContentToTexts(result, isError);
-    for (const text of texts) {
-      parts.push({
-        type: "text" as const,
-        text,
-        state: "done" as const,
-      });
-    }
-
-    return parts;
-  }
-
-  private resolveToolOutput(toolCallId: string, content: unknown, message: any): unknown {
+  private resolveToolOutput(
+    toolCallId: string,
+    content: unknown,
+    message: SDKMessage & { type: "user" },
+  ): unknown {
     if (this.contentOutputTools.has(toolCallId)) {
       return content;
     }
     // The SDK may attach the structured result as either snake_case (wire format)
-    // or camelCase (JS-normalized). Check both to handle either convention.
-    const structured = message.tool_use_result ?? message.toolUseResult;
+    // or camelCase (JS-normalized). The camelCase variant isn't on the SDK type,
+    // so probe via `in` and narrow with a small structural cast.
+    const camelToolUseResult =
+      "toolUseResult" in message
+        ? (message as { toolUseResult?: unknown }).toolUseResult
+        : undefined;
+    const structured = message.tool_use_result ?? camelToolUseResult;
     if (structured !== undefined) return structured;
 
     // Restore path: tool_use_result is stripped by getSessionMessages,
     // convert content (Anthropic API format) → outputSchema format.
     const toolName = this.toolNames.get(toolCallId);
     if (toolName) {
-      return this.contentToOutputSchema(toolName, content);
+      return contentToOutputSchema(toolName, content);
     }
     return content;
-  }
-
-  private contentToOutputSchema(toolName: string, content: unknown): unknown {
-    const entry = CONTENT_FALLBACK_CONVERTERS[toolName];
-    if (!entry) return undefined;
-
-    const converted = entry.convert(content);
-    const result = entry.schema.safeParse(converted);
-    return result.success ? result.data : undefined;
-  }
-
-  private parseReadToolContentLegacy(content: unknown) {
-    if (typeof content === "string") return { text: content, images: [] };
-    if (!Array.isArray(content))
-      return { text: content != null ? JSON.stringify(content) : "", images: [] };
-
-    const texts: string[] = [];
-    const images: { url: string; mediaType: string; filename?: string }[] = [];
-    for (const block of content) {
-      if (block?.type === "text" && typeof block.text === "string") {
-        texts.push(block.text);
-      } else if (block?.type === "image" && block.source) {
-        const src = block.source as {
-          type: string;
-          media_type?: string;
-          data?: string;
-          url?: string;
-        };
-        if (src.type === "base64" && src.data) {
-          images.push({
-            url: `data:${src.media_type || "image/png"};base64,${src.data}`,
-            mediaType: src.media_type || "image/png",
-            filename: block.filename,
-          });
-        } else if (src.type === "url" && src.url) {
-          images.push({
-            url: src.url,
-            mediaType: src.media_type || "image/png",
-            filename: block.filename,
-          });
-        }
-      }
-    }
-    return { text: texts.join("\n"), images };
-  }
-
-  private extractImageParts(result: unknown): ClaudeCodeUIMessage["parts"] {
-    const { images } = this.parseReadToolContentLegacy(result);
-    return images.map((img) => ({
-      type: "file" as const,
-      mediaType: img.mediaType,
-      url: img.url,
-      filename: img.filename,
-    }));
-  }
-
-  private resultContentToText(result: unknown, isError: boolean) {
-    return this.resultContentToTexts(result, isError).join("\n");
-  }
-
-  private resultContentToTexts(result: unknown, isError: boolean) {
-    const texts: string[] = [];
-
-    if (typeof result === "string") {
-      texts.push(result);
-    } else if (Array.isArray(result)) {
-      for (const part of result) {
-        if (
-          part != null &&
-          typeof part === "object" &&
-          "type" in part &&
-          part.type === "text" &&
-          "text" in part &&
-          typeof part.text === "string"
-        ) {
-          texts.push(part.text);
-        }
-      }
-    } else if (
-      result != null &&
-      typeof result === "object" &&
-      "result" in result &&
-      typeof result.result === "string"
-    ) {
-      texts.push(result.result);
-    } else if (result != null) {
-      texts.push(JSON.stringify(result));
-    }
-
-    return texts.length === 0 ? [isError ? "Task failed" : "Task completed"] : texts;
-  }
-
-  // AI SDK only requires a stable per-part id so start/delta/end can be merged.
-  // Anthropic's provider can use the raw content block index because it streams a
-  // single model response at a time. We replay many assistant messages through one
-  // UI stream, so the block index alone would collide across messages.
-  private textPartId(messageId: string, index: number) {
-    return `text:${messageId}:${index}`;
-  }
-
-  private reasoningPartId(messageId: string, index: number) {
-    return `reasoning:${messageId}:${index}`;
   }
 }
 
@@ -1026,10 +397,10 @@ export function toUIEvent(msg: SDKMessage): ClaudeCodeUIEvent | null {
     case "auth_status":
     case "prompt_suggestion":
     case "rate_limit_event": {
-      return { kind: "event", event: { id: (msg as any).uuid ?? crypto.randomUUID(), ...msg } };
+      return { kind: "event", event: { id: msg.uuid ?? crypto.randomUUID(), ...msg } };
     }
     case "system": {
-      const subtype = (msg as { subtype: string }).subtype;
+      const subtype = msg.subtype;
       if (
         subtype === "init" ||
         subtype === "compact_boundary" ||
@@ -1038,7 +409,7 @@ export function toUIEvent(msg: SDKMessage): ClaudeCodeUIEvent | null {
         return null;
       return {
         kind: "event",
-        event: { id: (msg as any).uuid ?? crypto.randomUUID(), ...msg },
+        event: { id: msg.uuid ?? crypto.randomUUID(), ...msg },
       } as ClaudeCodeUIEvent;
     }
     default:

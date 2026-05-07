@@ -1,27 +1,23 @@
-import debug from "debug";
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { cp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import type { PreviewSkill } from "../../../../shared/features/skills/types";
-import type { SkillInstaller } from "./types";
-
 import { shellEnvService } from "../../../core/shell-service";
-import {
-  deriveInstallName,
-  findSkillPath,
-  resolveSkillSource,
-  scanSkillDirs,
-} from "../skill-utils";
+import { BaseSkillInstaller, type FetchResult } from "./base";
 
 const execFileAsync = promisify(execFile);
-const log = debug("neovate:skills:git");
 
-export class GitInstaller implements SkillInstaller {
-  private previewDirs = new Map<string, { tmpDir: string; sourceRef: string; subpath?: string }>();
+interface GitInfo {
+  url: string;
+  branch?: string;
+  subpath?: string;
+}
+
+export class GitInstaller extends BaseSkillInstaller<GitInfo> {
+  constructor() {
+    super("neovate:skills:git");
+  }
 
   detect(sourceRef: string): boolean {
     if (sourceRef.startsWith("prebuilt:") || sourceRef.startsWith("npm:")) return false;
@@ -32,88 +28,27 @@ export class GitInstaller implements SkillInstaller {
     return false;
   }
 
-  async scan(sourceRef: string): Promise<{ previewId: string; skills: PreviewSkill[] }> {
-    log("scan", { sourceRef });
+  protected async fetchToTemp(sourceRef: string, tmpDir: string): Promise<FetchResult<GitInfo>> {
     const env = await shellEnvService.getEnv();
     const { url, branch, subpath } = this.parseSourceRef(sourceRef);
-    const previewId = randomUUID();
-    const tmpDir = path.join(tmpdir(), `neovate-skill-preview-${previewId}`);
-
     await this.cloneRepo({ url, branch, subpath, tmpDir, env });
-
-    this.previewDirs.set(previewId, { tmpDir, sourceRef, subpath });
-    const scanRoot = subpath ? path.join(tmpDir, subpath) : tmpDir;
-    const skills = await scanSkillDirs(scanRoot);
-    return { previewId, skills };
+    const baseDir = subpath ? path.join(tmpDir, subpath) : tmpDir;
+    return { baseDir, info: { url, branch, subpath } };
   }
 
-  async install(sourceRef: string, skillName: string, targetDir: string): Promise<void> {
-    log("install", { sourceRef, skillName, targetDir });
+  protected getCopyFilter(): (p: string) => boolean {
+    return (s) => path.basename(s) !== ".git";
+  }
+
+  protected async queryLatestVersion(sourceRef: string): Promise<string | undefined> {
     const env = await shellEnvService.getEnv();
-    const { url, branch, subpath } = this.parseSourceRef(sourceRef);
-    const tmpId = randomUUID();
-    const tmpDir = path.join(tmpdir(), `neovate-skill-preview-${tmpId}`);
-
-    try {
-      await this.cloneRepo({ url, branch, subpath, tmpDir, env });
-      const baseDir = subpath ? path.join(tmpDir, subpath) : tmpDir;
-      const skillPath = await findSkillPath(baseDir, skillName);
-      const src = resolveSkillSource(baseDir, skillPath);
-      const destName = deriveInstallName(skillName, sourceRef);
-      const dest = path.join(targetDir, destName);
-      const filter = (s: string) => path.basename(s) !== ".git";
-      await cp(src, dest, { recursive: true, filter });
-    } finally {
-      await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-    }
-  }
-
-  async installFromPreview(
-    previewId: string,
-    skillPaths: string[],
-    targetDir: string,
-  ): Promise<string[]> {
-    log("installFromPreview", { previewId, skillPaths });
-    const preview = this.previewDirs.get(previewId);
-    if (!preview) throw new Error("Preview not found or expired");
-
-    const installed: string[] = [];
-    const filter = (s: string) => path.basename(s) !== ".git";
-    const baseDir = preview.subpath ? path.join(preview.tmpDir, preview.subpath) : preview.tmpDir;
-    for (const sp of skillPaths) {
-      const destName = deriveInstallName(sp, preview.sourceRef);
-      const src = resolveSkillSource(baseDir, sp);
-      const dest = path.join(targetDir, destName);
-      await cp(src, dest, { recursive: true, filter });
-      installed.push(destName);
-    }
-
-    await this.cleanup(previewId);
-    return installed;
-  }
-
-  async cleanup(previewId: string): Promise<void> {
-    const preview = this.previewDirs.get(previewId);
-    if (preview) {
-      await rm(preview.tmpDir, { recursive: true, force: true }).catch(() => {});
-      this.previewDirs.delete(previewId);
-    }
-  }
-
-  async getLatestVersion(sourceRef: string): Promise<string | undefined> {
-    log("getLatestVersion", { sourceRef });
-    try {
-      const env = await shellEnvService.getEnv();
-      const { url } = this.parseSourceRef(sourceRef);
-      const { stdout } = await execFileAsync("git", ["ls-remote", url, "HEAD"], {
-        timeout: 15_000,
-        env,
-      });
-      const sha = stdout.split("\t")[0];
-      return sha ? sha.slice(0, 7) : undefined;
-    } catch {
-      return undefined;
-    }
+    const { url } = this.parseSourceRef(sourceRef);
+    const { stdout } = await execFileAsync("git", ["ls-remote", url, "HEAD"], {
+      timeout: 15_000,
+      env,
+    });
+    const sha = stdout.split("\t")[0];
+    return sha ? sha.slice(0, 7) : undefined;
   }
 
   /** Clean up any stale preview directories */
@@ -121,16 +56,13 @@ export class GitInstaller implements SkillInstaller {
     for (const [id, { tmpDir }] of this.previewDirs) {
       rm(tmpDir, { recursive: true, force: true })
         .then(() => this.previewDirs.delete(id))
+        // noop: best-effort cleanup of stale preview dirs; entry stays for next sweep
         .catch(() => {});
     }
   }
 
-  private parseSourceRef(sourceRef: string): {
-    url: string;
-    branch?: string;
-    subpath?: string;
-  } {
-    let raw = sourceRef.replace(/^git:/, "");
+  private parseSourceRef(sourceRef: string): GitInfo {
+    const raw = sourceRef.replace(/^git:/, "");
 
     // user/repo shorthand → github URL
     if (/^[\w.-]+\/[\w.-]+$/.test(raw)) {

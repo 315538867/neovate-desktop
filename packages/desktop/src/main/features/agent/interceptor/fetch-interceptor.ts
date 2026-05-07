@@ -11,7 +11,12 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 
-import { maskHeaders } from "./credential-mask";
+import {
+  maskCredentialsInString,
+  maskCredentialsInValue,
+  maskHeaders,
+  maskUrl,
+} from "./credential-mask";
 import { StreamAssembler, parseSSEEvents } from "./stream-assembler";
 
 // Lightweight debug logger — no dependency on the `debug` package.
@@ -153,9 +158,11 @@ function setup() {
     dlog("intercept: %s %s id=%s", method, url, id);
     const rawHeaders = extractHeaders(init);
     const maskedHdrs = maskHeaders(rawHeaders);
+    const maskedUrl = maskUrl(url);
 
     // Zero-copy: grab raw body string from fetch options
     const rawBody = typeof init?.body === "string" ? init.body : "";
+    const maskedBody = rawBody ? maskCredentialsInString(rawBody) : "";
 
     // Parse once for summary extraction
     let parsed: any = null;
@@ -168,7 +175,7 @@ function setup() {
     const summaryBase = {
       id,
       sessionId,
-      url,
+      url: maskedUrl,
       method,
       model: parsed?.model,
       isStream: parsed?.stream === true,
@@ -211,7 +218,7 @@ function setup() {
         duration,
         error: err?.message ?? "fetch failed",
         detail: {
-          request: { headers: maskedHdrs, rawBody },
+          request: { headers: maskedHdrs, rawBody: maskedBody },
         },
       });
       throw err;
@@ -221,6 +228,7 @@ function setup() {
     response.headers.forEach((v, k) => {
       respHeaders[k] = v;
     });
+    const maskedRespHeaders = maskHeaders(respHeaders);
 
     dlog(
       "response: id=%s status=%d stream=%s",
@@ -237,8 +245,8 @@ function setup() {
         id,
         summaryBase,
         maskedHdrs,
-        rawBody,
-        respHeaders,
+        maskedBody,
+        maskedRespHeaders,
         startTime,
       );
     }
@@ -249,8 +257,8 @@ function setup() {
       id,
       summaryBase,
       maskedHdrs,
-      rawBody,
-      respHeaders,
+      maskedBody,
+      maskedRespHeaders,
       startTime,
     );
   };
@@ -262,7 +270,7 @@ function setup() {
     _id: string,
     summaryBase: Record<string, unknown>,
     maskedHdrs: Record<string, string>,
-    rawBody: string,
+    maskedBody: string,
     respHeaders: Record<string, string>,
     startTime: number,
   ): Response {
@@ -322,8 +330,8 @@ function setup() {
                 : undefined,
               contentBlockTypes,
               detail: {
-                request: { headers: maskedHdrs, rawBody },
-                response: { headers: respHeaders, body: assembled },
+                request: { headers: maskedHdrs, rawBody: maskedBody },
+                response: { headers: respHeaders, body: maskCredentialsInValue(assembled) },
               },
             });
             return;
@@ -355,7 +363,7 @@ function setup() {
     _id: string,
     summaryBase: Record<string, unknown>,
     maskedHdrs: Record<string, string>,
-    rawBody: string,
+    maskedBody: string,
     respHeaders: Record<string, string>,
     startTime: number,
   ): Promise<Response> {
@@ -405,8 +413,8 @@ function setup() {
           }
         : undefined,
       detail: {
-        request: { headers: maskedHdrs, rawBody },
-        response: { headers: respHeaders, body: respBody },
+        request: { headers: maskedHdrs, rawBody: maskedBody },
+        response: { headers: respHeaders, body: maskCredentialsInValue(respBody) },
       },
     });
 

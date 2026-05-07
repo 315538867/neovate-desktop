@@ -1,19 +1,17 @@
-import { implement } from "@orpc/server";
-import debug from "debug";
 import { app } from "electron";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
-import type { AppContext } from "../../router";
-
-const log = debug("neovate:updater");
-
 import { updaterContract } from "../../../shared/features/updater/contract";
+import { defineRouter } from "../../core/router-factory";
 
 const require = createRequire(import.meta.url);
 
-const os = implement({ updater: updaterContract }).$context<AppContext>();
+const { os, log } = defineRouter({
+  contract: { updater: updaterContract },
+  debugNs: "neovate:updater",
+});
 
 export const updaterRouter = os.updater.router({
   check: os.updater.check.handler(({ context }) => {

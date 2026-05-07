@@ -42,7 +42,9 @@ function archiveOriginalSession(
   },
 ) {
   import("../../../orpc").then(({ client }) => {
-    client.agent.archiveSessionFile({ sessionId, ...meta }).catch(() => {});
+    // noop: archive is bookkeeping — fork has already been activated, so failure here
+    // only leaves the original session file un-tagged on disk
+    client.agent.session.archiveSessionFile({ sessionId, ...meta }).catch(() => {});
   });
 }
 
@@ -69,7 +71,7 @@ export function MessageRewindButton({ sessionId, messageId, disabled }: Props) {
     setDryRunLoading(true);
     try {
       const { client } = await import("../../../orpc");
-      const result = await client.agent.rewindFilesDryRun({ sessionId, messageId });
+      const result = await client.agent.session.rewindFilesDryRun({ sessionId, messageId });
       dryRunCache.set(cacheKey, result);
       setDryRun(result);
     } catch (error) {
@@ -114,7 +116,7 @@ export function MessageRewindButton({ sessionId, messageId, disabled }: Props) {
       try {
         // Extract text from the target message before the session switches
         const chat = claudeCodeChatManager.getChat(sessionId);
-        const messages = chat?.store.getState().messages ?? [];
+        const messages = chat?.messages ?? [];
         const targetMessage = messages.find((m) => m.id === messageId);
         // Prefill the input with the user-recognisable form: text verbatim,
         // slash commands collapsed back to `/cmd args` so re-submitting
@@ -150,7 +152,7 @@ export function MessageRewindButton({ sessionId, messageId, disabled }: Props) {
           original?.title,
         );
         const forkedChat = claudeCodeChatManager.getChat(result.forkedSessionId);
-        const forkedMessages = forkedChat?.store.getState().messages ?? [];
+        const forkedMessages = forkedChat?.messages ?? [];
 
         store.applyRewind(sessionId, result.forkedSessionId, {
           sessionId: result.forkedSessionId,
@@ -252,7 +254,7 @@ export function MessageRewindButton({ sessionId, messageId, disabled }: Props) {
         // Load original session back
         await claudeCodeChatManager.loadSession(originalSessionId, cwd);
         const chat = claudeCodeChatManager.getChat(originalSessionId);
-        const messages = chat?.store.getState().messages ?? [];
+        const messages = chat?.messages ?? [];
 
         store.undoRewindStore(originalSessionId, {
           sessionId: originalSessionId,

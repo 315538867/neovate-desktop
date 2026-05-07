@@ -1,21 +1,11 @@
 import AdmZip from "adm-zip";
-import debug from "debug";
-import { randomUUID } from "node:crypto";
-import { cp, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { PreviewSkill } from "../../../../shared/features/skills/types";
-import type { SkillInstaller } from "./types";
 
-import {
-  deriveInstallName,
-  findSkillPath,
-  resolveSkillSource,
-  scanSkillDirs,
-} from "../skill-utils";
-
-const log = debug("neovate:skills:clawhub");
+import { BaseSkillInstaller, type FetchResult, type PostProcessContext } from "./base";
+import { safeExtractZip } from "./zip-extract";
 
 const CLAWHUB_BASE = "https://clawhub.ai";
 const DOWNLOAD_TIMEOUT_MS = 60_000;
@@ -26,8 +16,10 @@ interface ParsedRef {
   version?: string;
 }
 
-export class ClawhubInstaller implements SkillInstaller {
-  private previewDirs = new Map<string, { tmpDir: string; sourceRef: string }>();
+export class ClawhubInstaller extends BaseSkillInstaller<ParsedRef> {
+  constructor() {
+    super("neovate:skills:clawhub");
+  }
 
   detect(sourceRef: string): boolean {
     return sourceRef.startsWith(`${CLAWHUB_BASE}/`) || sourceRef.startsWith("clawhub:");
@@ -39,93 +31,35 @@ export class ClawhubInstaller implements SkillInstaller {
     return `clawhub:${slug}`;
   }
 
-  async scan(sourceRef: string): Promise<{ previewId: string; skills: PreviewSkill[] }> {
+  protected async fetchToTemp(sourceRef: string, tmpDir: string): Promise<FetchResult<ParsedRef>> {
     const parsed = this.parseRef(sourceRef);
-    log("scan", parsed);
-
-    const previewId = randomUUID();
-    const tmpDir = path.join(tmpdir(), `neovate-skill-preview-${previewId}`);
     await mkdir(tmpDir, { recursive: true });
-
     await this.downloadAndExtract(parsed, tmpDir);
+    return { baseDir: tmpDir, info: parsed };
+  }
 
-    this.previewDirs.set(previewId, { tmpDir, sourceRef });
-    const skills = await scanSkillDirs(tmpDir);
-
+  protected postProcessSkills(
+    skills: PreviewSkill[],
+    ctx: PostProcessContext<ParsedRef>,
+  ): PreviewSkill[] {
     // Replace temp-dir-based names with the slug for root-level skills
-    const tmpDirName = path.basename(tmpDir);
+    const tmpDirName = path.basename(ctx.tmpDir);
     for (const skill of skills) {
       if (skill.skillPath === "." && skill.name === tmpDirName) {
-        skill.name = parsed.slug;
+        skill.name = ctx.info.slug;
       }
     }
-
-    return { previewId, skills };
+    return skills;
   }
 
-  async install(sourceRef: string, skillName: string, targetDir: string): Promise<void> {
-    const parsed = this.parseRef(sourceRef);
-    log("install", { ...parsed, skillName, targetDir });
-
-    const tmpId = randomUUID();
-    const tmpDir = path.join(tmpdir(), `neovate-skill-preview-${tmpId}`);
-    await mkdir(tmpDir, { recursive: true });
-
-    try {
-      await this.downloadAndExtract(parsed, tmpDir);
-      const skillPath = await findSkillPath(tmpDir, skillName);
-      const src = resolveSkillSource(tmpDir, skillPath);
-      const destName = deriveInstallName(skillName, sourceRef);
-      const dest = path.join(targetDir, destName);
-      await cp(src, dest, { recursive: true });
-    } finally {
-      await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-    }
-  }
-
-  async installFromPreview(
-    previewId: string,
-    skillPaths: string[],
-    targetDir: string,
-  ): Promise<string[]> {
-    log("installFromPreview", { previewId, skillPaths });
-    const preview = this.previewDirs.get(previewId);
-    if (!preview) throw new Error("Preview not found or expired");
-
-    const installed: string[] = [];
-    for (const sp of skillPaths) {
-      const destName = deriveInstallName(sp, preview.sourceRef);
-      const src = resolveSkillSource(preview.tmpDir, sp);
-      const dest = path.join(targetDir, destName);
-      await cp(src, dest, { recursive: true });
-      installed.push(destName);
-    }
-
-    await this.cleanup(previewId);
-    return installed;
-  }
-
-  async cleanup(previewId: string): Promise<void> {
-    const preview = this.previewDirs.get(previewId);
-    if (preview) {
-      await rm(preview.tmpDir, { recursive: true, force: true }).catch(() => {});
-      this.previewDirs.delete(previewId);
-    }
-  }
-
-  async getLatestVersion(sourceRef: string): Promise<string | undefined> {
+  protected async queryLatestVersion(sourceRef: string): Promise<string | undefined> {
     const { slug } = this.parseRef(sourceRef);
-    log("getLatestVersion", { slug });
-    try {
-      const res = await fetch(`${CLAWHUB_BASE}/api/v1/skills/${slug}`, {
-        signal: AbortSignal.timeout(METADATA_TIMEOUT_MS),
-      });
-      if (!res.ok) return undefined;
-      const data = await res.json();
-      return data?.latestVersion?.version ?? undefined;
-    } catch {
-      return undefined;
-    }
+    const res = await fetch(`${CLAWHUB_BASE}/api/v1/skills/${slug}`, {
+      signal: AbortSignal.timeout(METADATA_TIMEOUT_MS),
+    });
+    if (!res.ok) return undefined;
+    const data = await res.json();
+    return data?.latestVersion?.version ?? undefined;
   }
 
   private parseRef(sourceRef: string): ParsedRef {
@@ -155,7 +89,7 @@ export class ClawhubInstaller implements SkillInstaller {
     if (parsed.version) params.set("version", parsed.version);
 
     const url = `${CLAWHUB_BASE}/api/v1/download?${params}`;
-    log("downloading", { url });
+    this.log("downloading", { url });
 
     const res = await fetch(url, {
       signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
@@ -169,9 +103,9 @@ export class ClawhubInstaller implements SkillInstaller {
     await writeFile(zipPath, buffer);
 
     const zip = new AdmZip(zipPath);
-    zip.extractAllTo(destDir, true);
+    safeExtractZip(zip, destDir);
 
-    // Clean up the zip file
+    // noop: best-effort cleanup of downloaded zip; extraction already succeeded
     await rm(zipPath, { force: true }).catch(() => {});
   }
 }

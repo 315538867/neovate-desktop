@@ -2,6 +2,7 @@ import type { AnalyticsInstance } from "analytics";
 import type { BrowserWindow } from "electron";
 
 import type { SessionManager } from "../features/agent/session-manager";
+import type { DeeplinkConfirmBus } from "../features/deeplink/confirm-bus";
 import type { DeeplinkService } from "./deeplink/deeplink-service";
 import type { Disposable } from "./disposable";
 
@@ -48,5 +49,6 @@ export interface IMainApp {
   readonly subscriptions: { push(...disposables: Disposable[]): void };
   readonly windowManager: IBrowserWindowManager;
   readonly deeplink: DeeplinkService;
+  readonly deeplinkConfirmBus: DeeplinkConfirmBus;
   readonly analytics: AnalyticsInstance;
 }

@@ -2,7 +2,7 @@ import type { ContractRouterClient } from "@orpc/contract";
 
 import debug from "debug";
 
-import { agentContract } from "../../../../shared/features/agent/contract";
+import { sessionContract } from "../../../../shared/features/agent/contract";
 import { client } from "../../orpc";
 import { useConfigStore } from "../config/store";
 import { ClaudeCodeChat } from "./chat";
@@ -13,7 +13,9 @@ import { useAgentStore } from "./store";
 
 const log = debug("neovate:chat-manager");
 
-type AgentRpc = ContractRouterClient<{ agent: typeof agentContract }>["agent"];
+type AgentRpc = ContractRouterClient<{
+  agent: { session: typeof sessionContract };
+}>["agent"]["session"];
 
 export class ClaudeCodeChatManager {
   private readonly chats = new Map<string, ClaudeCodeChat>();
@@ -160,6 +162,7 @@ export class ClaudeCodeChatManager {
     await chat.stop();
     await chat.dispose();
     this.chats.delete(sessionId);
+    // noop: best-effort SDK cleanup; chat is already stopped and disposed locally
     this.rpc.claudeCode.closeSession({ sessionId }).catch(() => {});
   }
 
@@ -317,4 +320,4 @@ export class ClaudeCodeChatManager {
   }
 }
 
-export const claudeCodeChatManager = new ClaudeCodeChatManager(client.agent);
+export const claudeCodeChatManager = new ClaudeCodeChatManager(client.agent.session);

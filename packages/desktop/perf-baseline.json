@@ -1,0 +1,41 @@
+{
+  "timestamp": "2026-05-06T02:41:53.540Z",
+  "node": "v24.3.0",
+  "results": [
+    {
+      "name": "streaming-0prior-1000frames",
+      "iterations": 1000,
+      "totalMs": 1.4722919999999995,
+      "avgMs": 0.0014722919999999994,
+      "stableMessagesRefStable": true
+    },
+    {
+      "name": "streaming-50prior-1000frames",
+      "iterations": 1000,
+      "totalMs": 1.4833749999999988,
+      "avgMs": 0.0014833749999999988,
+      "stableMessagesRefStable": true
+    },
+    {
+      "name": "streaming-200prior-1000frames",
+      "iterations": 1000,
+      "totalMs": 1.4641249999999957,
+      "avgMs": 0.0014641249999999956,
+      "stableMessagesRefStable": true
+    },
+    {
+      "name": "push-500",
+      "iterations": 500,
+      "totalMs": 1.0454170000000005,
+      "avgMs": 0.002090834000000001,
+      "stableMessagesRefStable": true
+    },
+    {
+      "name": "messages-getter-50prior-10000reads",
+      "iterations": 10000,
+      "totalMs": 0.08370899999999892,
+      "avgMs": 0.000008370899999999893,
+      "stableMessagesRefStable": true
+    }
+  ]
+}

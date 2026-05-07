@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("../../orpc", () => ({ client: {} }));
+vi.mock("../../orpc", () => ({ client: { agent: { session: {} } } }));
 
 import { computeTotalWidth } from "../../components/app-layout/layout-coordinator";
 import { layoutStore } from "../../components/app-layout/store";

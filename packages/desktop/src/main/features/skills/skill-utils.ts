@@ -328,11 +328,13 @@ export async function scanInstalledSkills(
       // Read install metadata if present
       let version: string | undefined;
       let installedFrom: string | undefined;
+      let source: InstallMeta["source"] | undefined;
       try {
         const metaContent = await readFile(path.join(entryPath, INSTALL_META_FILE), "utf-8");
         const meta: InstallMeta = JSON.parse(metaContent);
         version = meta.version;
         installedFrom = meta.installedFrom;
+        source = meta.source;
       } catch {
         // No install metadata
       }
@@ -350,6 +352,7 @@ export async function scanInstalledSkills(
         frontmatter,
         version,
         installedFrom,
+        source,
       });
     } catch {
       continue;

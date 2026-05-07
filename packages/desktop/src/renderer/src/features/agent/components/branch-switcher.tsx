@@ -141,6 +141,7 @@ export function BranchSwitcher({ cwd, disabled }: Props) {
             setDetachedHead(result.data.detachedHead);
           }
         })
+        // noop: branch refetch is best-effort; UI keeps last known branch on failure
         .catch(() => {});
     };
     window.addEventListener("neovate:turn-completed", handler);
@@ -160,6 +161,7 @@ export function BranchSwitcher({ cwd, disabled }: Props) {
             setDetachedHead(result.data.detachedHead);
           }
         })
+        // noop: HEAD-watcher refetch is best-effort; UI keeps last known branch on failure
         .catch(() => {});
     };
     const cancel = consumeEventIterator(client.git.subscribeHead({ cwd }), {

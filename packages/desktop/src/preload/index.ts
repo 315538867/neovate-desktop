@@ -1,21 +1,55 @@
 import { electronAPI } from "@electron-toolkit/preload";
 import debug from "debug";
 import { contextBridge, ipcRenderer } from "electron";
-import { homedir } from "node:os";
 
 const log = debug("neovate:orpc:preload");
 
-window.addEventListener("message", (event) => {
-  if (event.data === "start-orpc-client") {
-    const [serverPort] = event.ports;
-    log("forwarding start-orpc-server");
-    ipcRenderer.postMessage("start-orpc-server", null, [serverPort]);
+/**
+ * Trusted origins for the renderer's `start-orpc-client` handshake.
+ *
+ * - `file://` is the production renderer (loaded via `loadFile`).
+ * - In dev, `electron-vite` serves the renderer at `http://localhost:<port>`.
+ *
+ * We additionally require `event.source === window` to defeat any iframe /
+ * webview that managed to call `window.postMessage` with a spoofed string —
+ * `source` always reflects the actual posting `Window`, which extension /
+ * embedded contexts cannot forge.
+ */
+const isTrustedHandshakeEvent = (event: MessageEvent): boolean => {
+  if (event.source !== window) return false;
+  if (event.origin === "" || event.origin === "null") return false;
+  try {
+    const { protocol, hostname } = new URL(event.origin);
+    if (protocol === "file:") return true;
+    if (protocol === "http:" || protocol === "https:") {
+      return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+    }
+    return false;
+  } catch {
+    return false;
   }
+};
+
+window.addEventListener("message", (event) => {
+  if (event.data !== "start-orpc-client") return;
+  if (!isTrustedHandshakeEvent(event)) {
+    log("rejected start-orpc-client from untrusted origin: %s", event.origin);
+    return;
+  }
+  const [serverPort] = event.ports;
+  if (!serverPort) {
+    log("rejected start-orpc-client: missing port");
+    return;
+  }
+  log("forwarding start-orpc-server");
+  ipcRenderer.postMessage("start-orpc-server", null, [serverPort]);
 });
 
 // API for renderer process (menu commands, etc.)
 const api = {
-  homedir: homedir(),
+  // homedir is fetched synchronously from main once per renderer init.
+  // sandbox=true forbids `node:os` in preload, so we round-trip via IPC.
+  homedir: ipcRenderer.sendSync("app:get-homedir") as string,
   isDev: !!process.defaultApp,
   onOpenSettings: (callback: () => void) => {
     ipcRenderer.on("menu:open-settings", callback);

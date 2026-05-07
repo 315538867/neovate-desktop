@@ -11,6 +11,7 @@ export function initClickTracking(analytics: AnalyticsInstance): () => void {
 
     const event = el.dataset.trackId!;
     log("tracked: %s", event);
+    // noop: analytics is fire-and-forget — failures must remain silent (no user signal)
     Promise.resolve(analytics.track(event, { trackType: "declarative-dom" })).catch(() => {});
   };
 
@@ -23,6 +24,7 @@ export function initMessageSentTracking(analytics: AnalyticsInstance): () => voi
   const handler = (e: Event) => {
     const { metadata } = (e as CustomEvent<{ metadata?: Record<string, unknown> }>).detail;
     log("tracked: chat.message.sent metadata=%o", metadata);
+    // noop: analytics is fire-and-forget — failures must remain silent
     Promise.resolve(
       analytics.track("chat.message.sent", { metadata, trackType: "programmatic" }),
     ).catch(() => {});

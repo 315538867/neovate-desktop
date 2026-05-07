@@ -114,7 +114,7 @@ function SessionRow({ session, onClosed }: { session: ActiveSessionInfo; onClose
 
   const handleClose = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    await client.agent.claudeCode.closeSession({ sessionId: session.sessionId });
+    await client.agent.session.claudeCode.closeSession({ sessionId: session.sessionId });
     onClosed();
   };
 
@@ -414,7 +414,7 @@ export default function DebugView() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await client.agent.activeSessions({});
+      const result = await client.agent.session.activeSessions({});
       setSessions(result);
     } finally {
       setLoading(false);

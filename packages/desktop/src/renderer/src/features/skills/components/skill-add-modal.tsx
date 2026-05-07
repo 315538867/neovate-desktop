@@ -89,6 +89,7 @@ export const SkillAddModal = ({ projects, onClose, onRefresh }: SkillAddModalPro
   const handleCancel = async () => {
     if (phase.step === "fetching" || phase.step === "select") {
       if ("previewId" in phase) {
+        // noop: preview cancellation is cleanup; modal is closing regardless
         client.skills.cancelPreview({ previewId: phase.previewId }).catch(() => {});
       }
     }

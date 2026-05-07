@@ -1,9 +1,11 @@
-import { implement } from "@orpc/server";
-
 import { contract } from "../../../shared/contract";
+import { defineRouterNoContext } from "../../core/router-factory";
 import { getStatsService } from "./stats-service";
 
-const os = implement(contract.stats);
+const { os } = defineRouterNoContext({
+  contract: contract.stats,
+  debugNs: "neovate:stats",
+});
 
 export const statsRouter = {
   getSummary: os.getSummary.handler(({ input }) => {

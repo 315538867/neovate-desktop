@@ -3,7 +3,10 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 vi.mock("../../../orpc", () => ({
   client: {
     agent: {
-      renameSession: vi.fn(),
+      session: {
+        renameSession: vi.fn(),
+        updateSessionStartTime: vi.fn(),
+      },
     },
   },
 }));

@@ -1,22 +1,27 @@
-import { implement } from "@orpc/server";
-import debug from "debug";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { AppConfig } from "../../../shared/features/config/types";
-import type { AppContext } from "../../router";
-
-const log = debug("neovate:config");
 
 import { configContract } from "../../../shared/features/config/contract";
+import { defineRouter } from "../../core/router-factory";
 import { writeModelSetting } from "../agent/claude-settings";
+import { assertRegistryAllowed } from "../skills/installers/registry-policy";
+import { isKeychainAvailable } from "./config-store";
 
-const os = implement({ config: configContract }).$context<AppContext>();
+const { os, log } = defineRouter({
+  contract: { config: configContract },
+  debugNs: "neovate:config",
+});
 
 export const configRouter = os.config.router({
   get: os.config.get.handler(({ context }) => {
     return context.configStore.getAll();
+  }),
+
+  getKeychainStatus: os.config.getKeychainStatus.handler(() => {
+    return { available: isKeychainAvailable() };
   }),
 
   getGlobalModelSelection: os.config.getGlobalModelSelection.handler(({ context }) => {
@@ -56,6 +61,13 @@ export const configRouter = os.config.router({
 
   set: os.config.set.handler(({ input, context }) => {
     log("set: key=%s", input.key);
+    // Wave 4.3 commit 7.4: enforce registry whitelist before persisting.
+    // The contract layer rejects http:// / non-URL; here we additionally
+    // reject hosts not on the allowlist so a config write cannot point
+    // npm at an attacker-controlled registry.
+    if (input.key === "npmRegistry") {
+      assertRegistryAllowed(input.value as string);
+    }
     context.configStore.set(input.key, input.value as AppConfig[typeof input.key]);
   }),
 });

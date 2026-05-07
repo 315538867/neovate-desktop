@@ -26,6 +26,7 @@ beforeEach(() => {
   context = {
     storage,
     sessionManager: {} as any,
+    orchestrator: {} as any,
     requestTracker: new RequestTracker(),
     configStore: {} as any,
     llmService: {} as any,
@@ -35,7 +36,6 @@ beforeEach(() => {
     mainApp: {} as any,
     stateStore: {} as any,
     updaterService: {} as any,
-    remoteControlService: {} as any,
   };
 });
 

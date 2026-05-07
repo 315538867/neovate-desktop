@@ -1,20 +1,18 @@
-import { implement } from "@orpc/server";
-import debug from "debug";
 import { shell } from "electron";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import type { AppContext } from "../../router";
-
 import { rulesContract } from "../../../shared/features/rules/contract";
+import { defineRouter } from "../../core/router-factory";
 
-const log = debug("neovate:rules-router");
+const { os, log } = defineRouter({
+  contract: { rules: rulesContract },
+  debugNs: "neovate:rules-router",
+});
 
 const CLAUDE_DIR = join(homedir(), ".claude");
 const GLOBAL_CLAUDE_MD = join(CLAUDE_DIR, "CLAUDE.md");
-
-const os = implement({ rules: rulesContract }).$context<AppContext>();
 
 export const rulesRouter = os.rules.router({
   readGlobal: os.rules.readGlobal.handler(async () => {

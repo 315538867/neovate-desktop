@@ -1,17 +1,19 @@
-import { ORPCError, implement } from "@orpc/server";
-
-import type { AppContext } from "../../router";
+import { ORPCError } from "@orpc/server";
 
 import { llmContract } from "../../../shared/features/llm/contract";
+import { defineRouter } from "../../core/router-factory";
 
-const os = implement({ llm: llmContract }).$context<AppContext>();
+const { os, log } = defineRouter({
+  contract: { llm: llmContract },
+  debugNs: "neovate:llm",
+  errorCode: "BAD_REQUEST",
+});
 
 function toORPCError(err: unknown): never {
   if (err instanceof ORPCError) throw err;
-  throw new ORPCError("BAD_REQUEST", {
-    defined: true,
-    message: err instanceof Error ? err.message : String(err),
-  });
+  const message = err instanceof Error ? err.message : String(err);
+  log("handler error: %s", message);
+  throw new ORPCError("BAD_REQUEST", { defined: true, message });
 }
 
 export const llmRouter = os.llm.router({

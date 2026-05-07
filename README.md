@@ -59,7 +59,6 @@ Neovate Desktop 站在以下开源项目的肩膀上：
 - [shadcn/ui](https://github.com/shadcn-ui/ui) — component primitives / 组件原语
 - [CodePilot](https://github.com/op7418/CodePilot) — multi-provider architecture reference / 多 Provider 架构参考
 - [cc-viewer](https://github.com/weiesky/cc-viewer) — network feature reference / 网络监控功能参考
-- [wechatbot](https://github.com/corespeed-io/wechatbot) — WeChat adapter reference (iLink Bot protocol, error recovery patterns) / 微信适配器参考（iLink Bot 协议、错误恢复模式）
 - [RTK](https://github.com/rtk-ai/rtk) — token-optimized CLI proxy / Token 优化 CLI 代理
 - [Bun](https://github.com/oven-sh/bun) — JavaScript runtime / JavaScript 运行时
 

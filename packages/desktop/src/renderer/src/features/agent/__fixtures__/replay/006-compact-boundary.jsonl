@@ -1,0 +1,13 @@
+{"type":"start","messageId":"msg-006"}
+{"type":"start-step"}
+{"type":"text-start","id":"text-pre"}
+{"type":"text-delta","id":"text-pre","delta":"Pre-compact reasoning."}
+{"type":"text-end","id":"text-pre"}
+{"type":"finish-step"}
+{"type":"data-system/compact_boundary","id":"cb-1","data":{"type":"system","subtype":"compact_boundary","uuid":"cb-1","session_id":"sess-006","compact_metadata":{"trigger":"auto","pre_tokens":120000,"post_tokens":40000}}}
+{"type":"start-step"}
+{"type":"text-start","id":"text-post"}
+{"type":"text-delta","id":"text-post","delta":"Post-compact continuation."}
+{"type":"text-end","id":"text-post"}
+{"type":"finish-step"}
+{"type":"finish"}

@@ -1,10 +1,10 @@
-import { implement } from "@orpc/server";
-
-import type { AppContext } from "../../router";
-
 import { stateContract } from "../../../shared/features/state/contract";
+import { defineRouter } from "../../core/router-factory";
 
-const os = implement({ state: stateContract }).$context<AppContext>();
+const { os } = defineRouter({
+  contract: { state: stateContract },
+  debugNs: "neovate:state",
+});
 
 export const stateRouter = os.state.router({
   load: os.state.load.handler(({ input, context }) => {

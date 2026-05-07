@@ -364,7 +364,7 @@ function ConnectedModelSelect({
         kind: "configure",
         configure: { type: "set_model", model },
       });
-      client.agent.setModelSetting({ sessionId: activeSessionId, model, scope: "session" });
+      client.agent.session.setModelSetting({ sessionId: activeSessionId, model, scope: "session" });
     },
     [activeSessionId, setCurrentModel, setModelScope],
   );
@@ -373,7 +373,7 @@ function ConnectedModelSelect({
     (scope: ModelScope | "clear") => {
       if (scope === "clear") {
         log("clearSessionOverride: sessionId=%s", activeSessionId);
-        client.agent
+        client.agent.session
           .setModelSetting({ sessionId: activeSessionId, model: null, scope: "session" })
           .then((result) => {
             if (result.currentModel) {
@@ -409,7 +409,7 @@ function ConnectedModelSelect({
           .then(invalidatePrewarm);
       } else {
         // SDK Default: write to .claude/ settings files (model can be null to just clear provider)
-        client.agent
+        client.agent.session
           .setModelSetting({ sessionId: activeSessionId, model, scope })
           .then(invalidatePrewarm);
       }

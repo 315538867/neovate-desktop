@@ -6,6 +6,7 @@ const log = debug("neovate:config");
 
 import type { AppConfig } from "../../../../shared/features/config/types";
 
+import { withReport } from "../../core/error-reporter";
 import { DEFAULT_KEYBINDINGS, type KeybindingAction } from "../../lib/keybindings";
 import { client } from "../../orpc";
 
@@ -13,6 +14,12 @@ type KeybindingsConfig = Record<KeybindingAction, string>;
 
 interface ConfigState extends AppConfig {
   loaded: boolean;
+  /**
+   * Whether OS keychain (Electron `safeStorage`) can encrypt/decrypt right now.
+   * `null` until the first `load()` resolves. When `false` the renderer surfaces
+   * a global banner since credentials cannot be stored securely (Wave 4.3 commit 7.2).
+   */
+  keychainAvailable: boolean | null;
   load: () => Promise<void>;
   // Generic setter for any config field
   setConfig: <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => void;
@@ -67,21 +74,36 @@ export const useConfigStore = create<ConfigState>()(
   immer((set, get) => ({
     ...DEFAULT_CONFIG,
     loaded: false,
+    keychainAvailable: null,
 
     load: async () => {
       log("loading config");
-      const config = await client.config.get();
-      log("config loaded", config);
+      // Fetch config + keychain status in parallel — both are read-only.
+      // If `getKeychainStatus` itself throws (very unlikely; it just calls
+      // `safeStorage.isEncryptionAvailable()`), treat that as unavailable
+      // so the banner surfaces conservatively.
+      const [config, keychainStatus] = await Promise.all([
+        client.config.get(),
+        client.config.getKeychainStatus().catch((err) => {
+          log("getKeychainStatus failed: %O", err);
+          return { available: false };
+        }),
+      ]);
+      log("config loaded keychainAvailable=%s", keychainStatus.available);
       set((state) => {
         Object.assign(state, config);
         state.loaded = true;
+        state.keychainAvailable = keychainStatus.available;
       });
     },
 
     // Generic setter - handles persistence automatically
     setConfig: (key, value) => {
       log("setConfig: key=%s", key, value);
-      client.config.set({ key, value } as any).catch(() => {});
+      void withReport(client.config.set({ key, value } as any), {
+        op: "config.set",
+        key,
+      });
       set({ [key]: value } as any);
     },
 
@@ -91,13 +113,18 @@ export const useConfigStore = create<ConfigState>()(
       set((state) => {
         state.keybindings[action] = binding;
       });
-      client.config.set({ key: "keybindings", value: get().keybindings }).catch(() => {});
+      void withReport(client.config.set({ key: "keybindings", value: get().keybindings }), {
+        op: "config.setKeybinding",
+        action,
+      });
     },
 
     resetKeybindings: () => {
       log("resetKeybindings");
       const keybindings = { ...DEFAULT_KEYBINDINGS } as KeybindingsConfig;
-      client.config.set({ key: "keybindings", value: keybindings }).catch(() => {});
+      void withReport(client.config.set({ key: "keybindings", value: keybindings }), {
+        op: "config.resetKeybindings",
+      });
       set({ keybindings });
     },
   })),

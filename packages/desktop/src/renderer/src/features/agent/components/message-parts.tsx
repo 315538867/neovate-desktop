@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 import { isReasoningUIPart, isToolUIPart, type ToolUIPart } from "ai";
-import { CheckIcon, CopyIcon, ChevronDownIcon, SendIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, ChevronDownIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 import { useTranslation } from "react-i18next";
@@ -249,15 +249,13 @@ export const MessagePartRenderer = memo(
     // parts (e.g. `[data-slash-command, text]` for `/zcf:workflow 你好`). To
     // make that feel like one message we render all in-bubble parts inside a
     // single <MessageContent>, sharing one bubble background. Out-of-bubble
-    // parts (file attachments, rewind actions, remote source label) sit
-    // outside the bubble but inside the same <Message> wrapper so they stay
-    // associated with the turn.
+    // parts (file attachments, rewind actions) sit outside the bubble but
+    // inside the same <Message> wrapper so they stay associated with the turn.
     if (message.role === "user") {
       const lastText = lastTextIndex >= 0 ? message.parts[lastTextIndex] : undefined;
       const lastTextStripped =
         lastText && lastText.type === "text" ? stripInterruptedMarker(lastText.text) : null;
       const interrupted = lastTextStripped?.interrupted ?? false;
-      const remoteSource = lastTextIndex >= 0 ? message.metadata?.source : undefined;
       const canShowUserActions = !!sessionId;
 
       // Collect parts that belong inside the shared bubble (slash + text).
@@ -349,12 +347,6 @@ export const MessagePartRenderer = memo(
                 </p>
               )}
             </MessageContent>
-          )}
-          {remoteSource && (
-            <span className="mt-1 ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
-              <SendIcon className="size-2.5" />
-              {remoteSource.platform.charAt(0).toUpperCase() + remoteSource.platform.slice(1)}
-            </span>
           )}
           {canShowUserActions && (
             <MessageActions className="mt-1 ml-auto">

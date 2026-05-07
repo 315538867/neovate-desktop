@@ -116,22 +116,6 @@ describe("initMessageSentTracking", () => {
     });
   });
 
-  it("tracks with remote-control source in metadata", () => {
-    cleanup = initMessageSentTracking(analytics);
-    const metadata = {
-      sessionId: "s1",
-      parentToolUseId: null,
-      source: { platform: "telegram" },
-    };
-
-    window.dispatchEvent(new CustomEvent("neovate:message-sent", { detail: { metadata } }));
-
-    expect(analytics.track).toHaveBeenCalledWith("chat.message.sent", {
-      metadata,
-      trackType: "programmatic",
-    });
-  });
-
   it("tracks with undefined metadata when no metadata provided", () => {
     cleanup = initMessageSentTracking(analytics);
 

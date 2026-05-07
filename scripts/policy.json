@@ -1,0 +1,32 @@
+{
+  "P0_critical": {
+    "description": "Highest-leverage code paths: ACP plumbing, root router, preload bridge. Tight ceiling forces small, focused modules.",
+    "paths": [
+      "src/main/router.ts",
+      "src/main/features/agent/**/*.ts",
+      "src/main/features/agent/**/*.tsx",
+      "src/preload/**/*.ts"
+    ],
+    "max": 500
+  },
+  "P1_features": {
+    "description": "Feature modules and plugin code in main + renderer.",
+    "paths": [
+      "src/main/features/**/*.ts",
+      "src/main/features/**/*.tsx",
+      "src/main/plugins/**/*.ts",
+      "src/main/plugins/**/*.tsx",
+      "src/renderer/src/features/**/*.ts",
+      "src/renderer/src/features/**/*.tsx",
+      "src/renderer/src/plugins/**/*.ts",
+      "src/renderer/src/plugins/**/*.tsx"
+    ],
+    "max": 800
+  },
+  "P2_general": {
+    "description": "Generic UI primitives. Looser ceiling because some shadcn-derived components are inherently large.",
+    "paths": ["src/renderer/src/components/**/*.tsx", "src/renderer/src/components/**/*.ts"],
+    "max": 1200
+  },
+  "exclude": ["**/__tests__/**", "**/*.test.ts", "**/*.test.tsx", "**/*.d.ts"]
+}

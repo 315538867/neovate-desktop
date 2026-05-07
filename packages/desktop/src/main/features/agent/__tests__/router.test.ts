@@ -5,7 +5,7 @@ import type { AppContext } from "../../../router";
 import type { SessionManager } from "../session-manager";
 
 import { RequestTracker } from "../request-tracker";
-import { agentRouter } from "../router";
+import { sessionRouter } from "../router";
 
 function makeContext(overrides?: Partial<AppContext>): AppContext {
   return {
@@ -15,6 +15,7 @@ function makeContext(overrides?: Partial<AppContext>): AppContext {
       closeSession: vi.fn(),
       closeAll: vi.fn(),
     } as unknown as SessionManager,
+    orchestrator: {} as any,
     requestTracker: new RequestTracker(),
     configStore: {} as any,
     llmService: {} as any,
@@ -25,22 +26,21 @@ function makeContext(overrides?: Partial<AppContext>): AppContext {
     skillsService: {} as any,
     stateStore: {} as any,
     updaterService: {} as any,
-    remoteControlService: {} as any,
     ...overrides,
   };
 }
 
-describe("agentRouter", () => {
+describe("sessionRouter", () => {
   it("listSessions delegates to sessionManager", async () => {
     const context = makeContext();
-    const result = await call(agentRouter.listSessions, { cwd: "/test" }, { context });
+    const result = await call(sessionRouter.listSessions, { cwd: "/test" }, { context });
     expect(result).toEqual([]);
     expect(context.sessionManager.listSessions).toHaveBeenCalledWith("/test");
   });
 
   it("renameSession delegates to sessionManager", async () => {
     const context = makeContext();
-    await call(agentRouter.renameSession, { sessionId: "s1", title: "new title" }, { context });
+    await call(sessionRouter.renameSession, { sessionId: "s1", title: "new title" }, { context });
     expect(context.sessionManager.renameSession).toHaveBeenCalledWith("s1", "new title");
   });
 });

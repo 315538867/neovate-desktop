@@ -29,6 +29,13 @@ const sidebarSortByValueSchema = z.enum(["created", "updated"]);
 export const configContract = {
   get: oc.output(type<AppConfig>()),
 
+  /**
+   * Returns whether the OS keychain (Electron `safeStorage`) can encrypt /
+   * decrypt right now. Renderer queries this once at startup so it can show a
+   * banner when credentials cannot be stored securely (Wave 4.3 commit 7.2).
+   */
+  getKeychainStatus: oc.output(type<{ available: boolean }>()),
+
   getGlobalModelSelection: oc.output(type<{ providerId?: string; model?: string }>()),
 
   setGlobalModelSelection: oc
@@ -72,7 +79,21 @@ export const configContract = {
         }),
         z.object({
           key: z.literal("npmRegistry"),
-          value: z.string().url().or(z.literal("")),
+          // Wave 4.3 commit 7.4: empty string = use npm default; otherwise
+          // must be a parseable https URL. The host whitelist is enforced
+          // in main (registry-policy.ts) — this layer just blocks the
+          // obviously-bad shapes (http://, javascript:, garbage strings).
+          value: z.string().refine(
+            (v) => {
+              if (v === "") return true;
+              try {
+                return new URL(v).protocol === "https:";
+              } catch {
+                return false;
+              }
+            },
+            { message: "npmRegistry must be empty or an https:// URL" },
+          ),
         }),
       ]),
     )

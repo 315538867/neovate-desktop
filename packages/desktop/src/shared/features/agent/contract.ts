@@ -19,7 +19,14 @@ import type {
   SessionLifecycleEvent,
 } from "./types";
 
-export const agentContract = {
+/**
+ * Wave 3.1 split: this contract was previously exported as `agentContract`
+ * and bound to the top-level `agent` key. It now backs `agent.session.*`;
+ * orchestration leaves live under `agent.orchestrator.*` (see
+ * `../agent-orchestrator/contract.ts`). No compat alias is exported —
+ * call sites must migrate to the new path.
+ */
+export const sessionContract = {
   activeSessions: oc.input(z.object({})).output(type<ActiveSessionInfo[]>()),
 
   subscribeSessionLifecycle: oc.output(eventIterator(type<SessionLifecycleEvent>())),

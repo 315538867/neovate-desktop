@@ -10,6 +10,7 @@ describe("main router context wiring", () => {
   it("ping returns pong", async () => {
     const context = {
       sessionManager: {} as unknown as AppDependencies["sessionManager"],
+      orchestrator: {} as unknown as AppDependencies["orchestrator"],
       requestTracker: new RequestTracker(),
       configStore: {} as unknown as AppDependencies["configStore"],
       projectStore: {} as unknown as AppDependencies["projectStore"],
@@ -18,7 +19,6 @@ describe("main router context wiring", () => {
       stateStore: {} as unknown as AppDependencies["stateStore"],
       updaterService: {} as unknown as AppDependencies["updaterService"],
       llmService: {} as unknown as AppDependencies["llmService"],
-      remoteControlService: {} as unknown as AppDependencies["remoteControlService"],
       mainApp: { windowManager: { mainWindow: null } } as any,
       storage: {} as unknown as AppDependencies["storage"],
     } satisfies AppDependencies;
