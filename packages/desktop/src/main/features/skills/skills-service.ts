@@ -309,6 +309,7 @@ export class SkillsService {
 
     // Backup old skill instead of deleting — restore on failure
     const backupDir = `${skillDir}.update-backup`;
+    // noop: best-effort cleanup of any leftover backup from a previous failed update
     await rm(backupDir, { recursive: true, force: true }).catch(() => {});
     await rename(skillDir, backupDir);
 
@@ -331,6 +332,7 @@ export class SkillsService {
       if (wasDisabled) {
         const enabledPath = path.join(skillDir, "SKILL.md");
         const disabledPath = path.join(skillDir, "SKILL.md.disabled");
+        // noop: best-effort rename; if SKILL.md isn't present the install layout may already differ
         await rename(enabledPath, disabledPath).catch(() => {});
       }
 
@@ -338,6 +340,7 @@ export class SkillsService {
       await rm(backupDir, { recursive: true, force: true });
     } catch (e) {
       // Restore from backup
+      // noop: best-effort cleanup of partial install before restoring backup
       await rm(skillDir, { recursive: true, force: true }).catch(() => {});
       await rename(backupDir, skillDir);
       throw e;

@@ -70,7 +70,7 @@ export async function downloadCodeServer(onProgress?: ProgressCallback): Promise
     await fsp.rm(tempDir, { recursive: true, force: true });
     log("code-server download complete");
   } catch (error) {
-    // Cleanup on failure
+    // noop: best-effort cleanup; original error is rethrown below
     await fsp.rm(tempDir, { recursive: true, force: true }).catch(() => {});
     await fsp.rm(binaryPath, { recursive: true, force: true }).catch(() => {});
 
@@ -131,12 +131,14 @@ function downloadFile(url: string, destPath: string, onProgress?: ProgressCallba
 
     request.on("error", (error) => {
       file.close();
+      // noop: best-effort cleanup of partial download — original error is propagated below
       fsp.unlink(destPath).catch(() => {});
       reject(new CodeServerDownloadError(error.message, error));
     });
 
     file.on("error", (error) => {
       file.close();
+      // noop: best-effort cleanup of partial download — original error is propagated below
       fsp.unlink(destPath).catch(() => {});
       reject(new CodeServerDownloadError(error.message, error));
     });

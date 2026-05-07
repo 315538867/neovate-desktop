@@ -115,6 +115,7 @@ export abstract class BaseSkillInstaller<TInfo = unknown> implements SkillInstal
       const dest = path.join(targetDir, destName);
       await cp(src, dest, { recursive: true, filter: this.getCopyFilter() });
     } finally {
+      // noop: best-effort cleanup of preview tmpDir; failures are non-actionable
       await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
   }
@@ -145,6 +146,7 @@ export abstract class BaseSkillInstaller<TInfo = unknown> implements SkillInstal
   async cleanup(previewId: string): Promise<void> {
     const preview = this.previewDirs.get(previewId);
     if (preview) {
+      // noop: best-effort cleanup of preview tmpDir; map entry is dropped regardless
       await rm(preview.tmpDir, { recursive: true, force: true }).catch(() => {});
       this.previewDirs.delete(previewId);
     }

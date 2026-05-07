@@ -56,6 +56,7 @@ export class GitInstaller extends BaseSkillInstaller<GitInfo> {
     for (const [id, { tmpDir }] of this.previewDirs) {
       rm(tmpDir, { recursive: true, force: true })
         .then(() => this.previewDirs.delete(id))
+        // noop: best-effort cleanup of stale preview dirs; entry stays for next sweep
         .catch(() => {});
     }
   }

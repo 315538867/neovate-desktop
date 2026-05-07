@@ -105,7 +105,7 @@ export class ClawhubInstaller extends BaseSkillInstaller<ParsedRef> {
     const zip = new AdmZip(zipPath);
     safeExtractZip(zip, destDir);
 
-    // Clean up the zip file
+    // noop: best-effort cleanup of downloaded zip; extraction already succeeded
     await rm(zipPath, { force: true }).catch(() => {});
   }
 }
