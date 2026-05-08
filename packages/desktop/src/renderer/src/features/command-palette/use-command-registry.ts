@@ -33,6 +33,7 @@ import { formatKeyForDisplay, DEFAULT_KEYBINDINGS } from "../../lib/keybindings"
 import { useLoadSession } from "../agent/hooks/use-load-session";
 import { useNewSession } from "../agent/hooks/use-new-session";
 import { navigateSession } from "../agent/navigate-session";
+import { isSessionInProject } from "../agent/session-utils";
 import { useAgentStore } from "../agent/store";
 import { useConfigStore } from "../config/store";
 import { useProjectStore } from "../project/store";
@@ -365,7 +366,7 @@ export function useCommandRegistry() {
     for (const info of agentSessions) {
       if (archivedIds.has(info.sessionId)) continue;
       // In single-project mode, only show sessions for active project
-      if (!multiProjectSupport && projectPath && info.cwd && !info.cwd.startsWith(projectPath)) {
+      if (!multiProjectSupport && projectPath && !isSessionInProject(info.cwd, projectPath)) {
         continue;
       }
       seen.add(info.sessionId);
@@ -402,12 +403,7 @@ export function useCommandRegistry() {
     for (const [, session] of sessions) {
       if (seen.has(session.sessionId) || session.isNew) continue;
       if (archivedIds.has(session.sessionId)) continue;
-      if (
-        !multiProjectSupport &&
-        projectPath &&
-        session.cwd &&
-        !session.cwd.startsWith(projectPath)
-      ) {
+      if (!multiProjectSupport && projectPath && !isSessionInProject(session.cwd, projectPath)) {
         continue;
       }
 

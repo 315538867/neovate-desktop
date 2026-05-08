@@ -12,11 +12,23 @@ import { useAgentStore } from "./store";
 
 const log = debug("neovate:session-utils");
 
+/**
+ * Check whether a session's cwd belongs to the given project path.
+ *
+ * Uses `cwd === projectPath || cwd.startsWith(projectPath + "/")` instead
+ * of a bare `startsWith` so that `/Volumes/code/foo` does not incorrectly
+ * match sessions from `/Volumes/code/foo-bar`.
+ */
+export function isSessionInProject(cwd: string | undefined, projectPath: string): boolean {
+  if (!cwd) return false;
+  return cwd === projectPath || cwd.startsWith(projectPath + "/");
+}
+
 /** Find any existing isNew session for the given project path. */
 export function findPreWarmedSession(projectPath: string): string | null {
   const { sessions } = useAgentStore.getState();
   for (const [id, session] of sessions) {
-    if (session.isNew && session.cwd?.startsWith(projectPath)) {
+    if (session.isNew && isSessionInProject(session.cwd, projectPath)) {
       return id;
     }
   }

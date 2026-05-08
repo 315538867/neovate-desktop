@@ -10,6 +10,7 @@ import type { ChatSession } from "../store";
 import { useConfigStore } from "../../config/store";
 import { useProjectStore } from "../../project/store";
 import { useLoadSession } from "../hooks/use-load-session";
+import { isSessionInProject } from "../session-utils";
 import { useAgentStore } from "../store";
 import { ChronologicalList } from "./chronological-list";
 import { EmptySessionState } from "./empty-session-state";
@@ -116,7 +117,7 @@ const SingleProjectSessionList = memo(function SingleProjectSessionList() {
 
     const archived = new Set(archivedSessions[projectPath] ?? []);
     const pinnedSet = new Set(pinnedSessions[projectPath] ?? []);
-    const matchesProject = (cwd?: string) => cwd?.startsWith(projectPath) ?? false;
+    const matchesProject = (cwd?: string) => isSessionInProject(cwd, projectPath);
 
     const loadedIds = new Set(sessionsArray.map((s) => s.sessionId));
 

@@ -6,6 +6,7 @@ import type { ChatSession } from "./store";
 import { useConfigStore } from "../config/store";
 import { useProjectStore } from "../project/store";
 import { claudeCodeChatManager } from "./chat-manager";
+import { isSessionInProject } from "./session-utils";
 import { useAgentStore } from "./store";
 
 const log = debug("neovate:session:navigate");
@@ -55,12 +56,12 @@ export function navigateSession(direction: "prev" | "next"): void {
 
   const matchesScope = (cwd?: string) => {
     if (!cwd) return false;
-    return scopePaths.some((p) => cwd.startsWith(p));
+    return scopePaths.some((p) => isSessionInProject(cwd, p));
   };
 
   const matchesActiveProject = (cwd?: string) => {
     if (!cwd) return false;
-    return cwd.startsWith(activeProject.path);
+    return isSessionInProject(cwd, activeProject.path);
   };
 
   // Build pinned/archived sets

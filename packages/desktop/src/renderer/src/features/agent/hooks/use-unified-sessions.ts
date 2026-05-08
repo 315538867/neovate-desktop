@@ -5,6 +5,7 @@ import type { ChatSession } from "../store";
 
 import { useConfigStore } from "../../config/store";
 import { useProjectStore } from "../../project/store";
+import { isSessionInProject } from "../session-utils";
 import { useAgentStore } from "../store";
 
 export type UnifiedItem =
@@ -58,13 +59,13 @@ export function useFilteredSessions({
     const scopePaths = projectPath ? [projectPath] : projects.map((p) => p.path);
     const matchesScope = (cwd?: string) => {
       if (!cwd) return false;
-      return scopePaths.some((p) => cwd.startsWith(p));
+      return scopePaths.some((p) => isSessionInProject(cwd, p));
     };
 
     const resolveProjectPath = (cwd?: string): string => {
       if (projectPath) return projectPath;
       if (!cwd) return projects[0]?.path ?? "";
-      const match = projects.find((p) => cwd.startsWith(p.path));
+      const match = projects.find((p) => isSessionInProject(cwd, p.path));
       return match?.path ?? projects[0]?.path ?? "";
     };
 
