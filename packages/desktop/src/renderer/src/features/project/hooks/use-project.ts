@@ -29,6 +29,7 @@ export function useProject() {
 
   useEffect(() => {
     void fetchProjects();
+    void useGroupsStore.getState().loadGroups();
   }, [fetchProjects]);
 
   const openProject = useCallback(async () => {
