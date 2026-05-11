@@ -48,19 +48,33 @@ export function registerSessionInStore(
     permissionMode?: PermissionMode;
   },
   activate: boolean,
+  groupMeta?: {
+    kind?: "group";
+    groupId?: string;
+    focusProjectId?: string;
+  },
 ) {
   log(
-    "registerSessionInStore: sessionId=%s projectPath=%s activate=%s model=%s",
+    "registerSessionInStore: sessionId=%s projectPath=%s activate=%s model=%s kind=%s groupId=%s",
     sessionId,
     projectPath,
     activate,
     capabilities.currentModel,
+    groupMeta?.kind,
+    groupMeta?.groupId,
   );
   const store = useAgentStore.getState();
+  const meta = {
+    cwd: projectPath,
+    isNew: true,
+    kind: groupMeta?.kind,
+    groupId: groupMeta?.groupId,
+    focusProjectId: groupMeta?.focusProjectId,
+  };
   if (activate) {
-    store.createSession(sessionId, { cwd: projectPath, isNew: true });
+    store.createSession(sessionId, meta);
   } else {
-    store.createBackgroundSession(sessionId, { cwd: projectPath, isNew: true });
+    store.createBackgroundSession(sessionId, meta);
   }
   if (capabilities.commands?.length) store.setAvailableCommands(sessionId, capabilities.commands);
   if (capabilities.models?.length) store.setAvailableModels(sessionId, capabilities.models);

@@ -206,14 +206,9 @@ describe("usePinnedState", () => {
 
     act(() => result.current.leaveBottom());
     expect(result.current.isPinnedRef.current).toBe(false);
-    // User has stopped scrolling AND is at the geometric bottom — but a
-    // scrollend without a recent downward intent must NOT re-pin (the
-    // intent gate blocks the browser's scrollTop-clamp side-effect).
-    el.dispatchEvent(new Event("scrollend"));
-    expect(result.current.isPinnedRef.current).toBe(false);
-
-    // Now express a downward intent (wheel down) AND fire scrollend at bottom.
-    el.dispatchEvent(new WheelEvent("wheel", { deltaY: 30 }));
+    // scrollend at the geometric bottom is sufficient to re-pin — no
+    // separate "downward intent" gate is required (intentionally, so
+    // scrollbar-thumb drags also re-engage follow).
     el.dispatchEvent(new Event("scrollend"));
     expect(result.current.isPinnedRef.current).toBe(true);
     unmount();
@@ -259,12 +254,12 @@ describe("usePinnedState", () => {
   });
 
   it("scrollend after a height-shrink mask is IGNORED (collapse-clamp regression)", async () => {
-    // Regression test: when a Reasoning block auto-collapses while the user
-    // is reading scrollback, scrollHeight shrinks. The browser then clamps
-    // scrollTop to (scrollHeight - clientHeight), which fires scroll +
-    // scrollend with geometry "at bottom". Before this fix, that clamp
-    // re-pinned the user and yanked them back down. After the fix,
-    // notifyHeightShrink() opens a 350ms mask that suppresses scrollend.
+    // Regression test: when a Reasoning/Tool/ChainOfThought block collapses
+    // while the user is reading scrollback, scrollHeight shrinks. The
+    // browser then clamps scrollTop to (scrollHeight - clientHeight), which
+    // fires scroll + scrollend with geometry "at bottom". Without the mask,
+    // that clamp would re-pin the user and yank them back down. The fix:
+    // notifyHeightShrink() opens a 600ms mask that suppresses scrollend.
     const { result, el, unmount } = renderPinned({
       scrollTop: 800,
       scrollHeight: 2000,
@@ -284,7 +279,12 @@ describe("usePinnedState", () => {
     unmount();
   });
 
-  it("scrollend without a recent downward intent does NOT flip pin", async () => {
+  it("scrollend at bottom without prior input re-pins (scrollbar drag scenario)", async () => {
+    // Core fix: a user drags the scrollbar thumb to the bottom. There is no
+    // wheel/touch/keydown event — the OS-native scrollbar drag bypasses
+    // those entirely. After settling, only `scrollend` fires. The previous
+    // `DOWN_INTENT_WINDOW_MS` gate would block re-pinning here; this test
+    // ensures it does NOT block and the pin re-engages.
     const { result, el, unmount } = renderPinned({
       scrollTop: 1500,
       scrollHeight: 2000,
@@ -293,14 +293,16 @@ describe("usePinnedState", () => {
     await waitForListenersBound();
 
     act(() => result.current.leaveBottom());
-    // No wheel/touch/keyboard down intent — scrollend at bottom must be
-    // treated as side-effect (e.g. layout reflow), not user intent.
-    el.dispatchEvent(new Event("scrollend"));
     expect(result.current.isPinnedRef.current).toBe(false);
+    // No wheel/touch/keydown — pure scrollbar-drag scenario.
+    el.dispatchEvent(new Event("scrollend"));
+    expect(result.current.isPinnedRef.current).toBe(true);
     unmount();
   });
 
-  it("wheel down + scrollend at bottom flips pin ON (legitimate user settle)", async () => {
+  it("scrollend at bottom after height-shrink mask expires re-pins", async () => {
+    // After the mask window closes, normal re-pin logic resumes — a
+    // legitimate "user settled at bottom" event should still work.
     const { result, el, unmount } = renderPinned({
       scrollTop: 1500,
       scrollHeight: 2000,
@@ -309,27 +311,14 @@ describe("usePinnedState", () => {
     await waitForListenersBound();
 
     act(() => result.current.leaveBottom());
-    el.dispatchEvent(new WheelEvent("wheel", { deltaY: 80 }));
-    el.dispatchEvent(new Event("scrollend"));
-    expect(result.current.isPinnedRef.current).toBe(true);
-    unmount();
-  });
+    act(() => result.current.notifyHeightShrink());
 
-  it("PageDown/ArrowDown count as downward intent for scrollend gating", async () => {
-    const { result, el, unmount } = renderPinned({
-      scrollTop: 1500,
-      scrollHeight: 2000,
-      clientHeight: 500,
+    // Wait > 600ms (mask window) for the mask to expire. Use real timers so
+    // performance.now() advances naturally; renderPinned does not fake them.
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 650));
     });
-    await waitForListenersBound();
 
-    act(() => result.current.leaveBottom());
-    el.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown" }));
-    el.dispatchEvent(new Event("scrollend"));
-    expect(result.current.isPinnedRef.current).toBe(true);
-
-    act(() => result.current.leaveBottom());
-    el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
     el.dispatchEvent(new Event("scrollend"));
     expect(result.current.isPinnedRef.current).toBe(true);
     unmount();

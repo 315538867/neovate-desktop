@@ -41,7 +41,7 @@ export class ClaudeCodeExecutor implements Executor {
       throw new Error(`[orchestrator] aborted before start (reason=${signal.reason ?? "unknown"})`);
     }
 
-    const session = await this.deps.sessionManager.createSession(cwd, stage.model);
+    const session = await this.deps.sessionManager.createSession({ cwd, model: stage.model });
     const sessionId = session.sessionId;
     log(
       "createSession sessionId=%s currentModel=%s",

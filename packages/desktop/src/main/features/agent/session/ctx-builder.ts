@@ -20,6 +20,7 @@ import type { SessionLifecycleEvent } from "../../../../shared/features/agent/ty
 import type { Contributions } from "../../../core/plugin/contributions";
 import type { PowerBlockerService } from "../../../core/power-blocker-service";
 import type { ConfigStore } from "../../config/config-store";
+import type { GroupService } from "../../project/group-service";
 import type { ProjectStore } from "../../project/project-store";
 import type { RequestTracker } from "../request-tracker";
 import type { CloseContext } from "./close";
@@ -44,6 +45,7 @@ export interface SessionContextsDeps {
 
   configStore: ConfigStore;
   projectStore: ProjectStore;
+  groupService: GroupService;
   requestTracker: RequestTracker;
   powerBlocker: PowerBlockerService;
   eventPublisher: EventPublisher<Record<string, ClaudeCodeUIEvent>>;
@@ -53,6 +55,7 @@ export interface SessionContextsDeps {
   createSession: (cwd: string) => Promise<{ sessionId: string }>;
   startConsume: (sessionId: string) => void;
   emitLifecycle: (event: SessionLifecycleEvent) => void;
+  restartConsume: (sessionId: string) => Promise<void>;
 
   log: LogFn;
   rtkLog: LogFn;
@@ -88,6 +91,7 @@ export function buildSessionContexts(deps: SessionContextsDeps): SessionContexts
     requestTracker: deps.requestTracker,
     powerBlocker: deps.powerBlocker,
     eventPublisher: deps.eventPublisher,
+    restartConsume: deps.restartConsume,
   };
 
   const dispatchContext: DispatchContext = {
@@ -109,6 +113,7 @@ export function buildSessionContexts(deps: SessionContextsDeps): SessionContexts
   const facadeContext: FacadeContext = {
     configStore: deps.configStore,
     projectStore: deps.projectStore,
+    groupService: deps.groupService,
     initContext,
     log: deps.log,
   };

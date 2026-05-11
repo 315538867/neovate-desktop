@@ -55,6 +55,8 @@ export type SessionUsage = {
   remainingPct: number;
 };
 
+import type { ConversationKind } from "../../../../shared/features/agent/types";
+
 export type ChatSession = {
   sessionId: string;
   cwd?: string;
@@ -70,6 +72,9 @@ export type ChatSession = {
   permissionMode?: PermissionMode;
   usage?: SessionUsage;
   tasks: Map<string, TaskState>;
+  kind?: ConversationKind;
+  groupId?: string;
+  focusProjectId?: string;
 };
 
 export type RewindUndoBuffer = {
@@ -96,11 +101,27 @@ type AgentState = {
   setAgentSessions: (sessions: SessionInfo[]) => void;
   createSession: (
     sessionId: string,
-    meta?: { title?: string; createdAt?: string; cwd?: string; isNew?: boolean },
+    meta?: {
+      title?: string;
+      createdAt?: string;
+      cwd?: string;
+      isNew?: boolean;
+      kind?: ConversationKind;
+      groupId?: string;
+      focusProjectId?: string;
+    },
   ) => void;
   createBackgroundSession: (
     sessionId: string,
-    meta?: { title?: string; createdAt?: string; cwd?: string; isNew?: boolean },
+    meta?: {
+      title?: string;
+      createdAt?: string;
+      cwd?: string;
+      isNew?: boolean;
+      kind?: ConversationKind;
+      groupId?: string;
+      focusProjectId?: string;
+    },
   ) => void;
   removeSession: (sessionId: string) => void;
   addUserMessage: (sessionId: string, content: string) => void;
@@ -109,6 +130,7 @@ type AgentState = {
   setCurrentModel: (sessionId: string, model: string) => void;
   setModelScope: (sessionId: string, scope: ModelScope | undefined) => void;
   setProviderId: (sessionId: string, providerId: string | undefined) => void;
+  setFocusProject: (sessionId: string, focusProjectId: string) => void;
   setPermissionMode: (sessionId: string, mode: PermissionMode) => void;
   setSessionUsage: (
     sessionId: string,
@@ -205,6 +227,9 @@ export const useAgentStore = create<AgentState>()(
           availableCommands: [],
           availableModels: [],
           tasks: new Map(),
+          kind: meta?.kind,
+          groupId: meta?.groupId,
+          focusProjectId: meta?.focusProjectId,
         });
         state.activeSessionId = sessionId;
         state._sessionsMetaVersion += 1;
@@ -225,6 +250,9 @@ export const useAgentStore = create<AgentState>()(
           availableCommands: [],
           availableModels: [],
           tasks: new Map(),
+          kind: meta?.kind,
+          groupId: meta?.groupId,
+          focusProjectId: meta?.focusProjectId,
         });
         state._sessionsMetaVersion += 1;
         storeLog("createBackgroundSession: totalSessions=%d (not activated)", state.sessions.size);
@@ -364,6 +392,17 @@ export const useAgentStore = create<AgentState>()(
         const session = state.sessions.get(sessionId);
         if (session) {
           session.providerId = providerId;
+          state._sessionsMetaVersion += 1;
+        }
+      });
+    },
+
+    setFocusProject: (sessionId, focusProjectId) => {
+      storeLog("setFocusProject: sid=%s focus=%s", sessionId, focusProjectId);
+      set((state) => {
+        const session = state.sessions.get(sessionId);
+        if (session) {
+          session.focusProjectId = focusProjectId;
           state._sessionsMetaVersion += 1;
         }
       });

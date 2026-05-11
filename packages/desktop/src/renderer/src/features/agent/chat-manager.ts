@@ -50,9 +50,23 @@ export class ClaudeCodeChatManager {
     },
   };
 
-  async createSession(cwd: string, opts?: { providerId?: string | null }) {
+  async createSession(
+    cwd: string,
+    opts?: {
+      providerId?: string | null;
+      kind?: "single" | "group";
+      groupId?: string;
+      focusProjectId?: string;
+    },
+  ) {
     const { sessionId, currentModel, modelScope, providerId, ...capabilities } =
-      await this.rpc.claudeCode.createSession({ cwd, providerId: opts?.providerId });
+      await this.rpc.claudeCode.createSession({
+        cwd,
+        providerId: opts?.providerId,
+        kind: opts?.kind,
+        groupId: opts?.groupId,
+        focusProjectId: opts?.focusProjectId,
+      });
     const chat = new ClaudeCodeChat({
       id: sessionId,
       transport: this.transport,

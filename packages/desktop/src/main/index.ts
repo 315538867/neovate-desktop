@@ -38,6 +38,7 @@ import { PluginsService } from "./features/claude-code-plugins/plugins-service";
 import { ConfigStore } from "./features/config/config-store";
 import { LlmService } from "./features/llm/llm-service";
 import { PopupWindowShortcut } from "./features/popup-window/global-shortcut";
+import { GroupService } from "./features/project/group-service";
 import { ProjectStore } from "./features/project/project-store";
 import { SkillsService } from "./features/skills/skills-service";
 import { StateStore } from "./features/state/state-store";
@@ -99,11 +100,13 @@ process.on("unhandledRejection", (reason) => {
 });
 const requestTracker = new RequestTracker();
 const powerBlocker = new PowerBlockerService(configStore);
+const groupService = new GroupService(projectStore);
 const sessionManager = new SessionManager(
   configStore,
   projectStore,
   requestTracker,
   powerBlocker,
+  groupService,
   () => mainApp.pluginManager.contributions.agents,
 );
 const stateStore = new StateStore();

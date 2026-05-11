@@ -1,17 +1,18 @@
 import { Comment01Icon, HelpCircleIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import debug from "debug";
-import { Archive, Circle, MessageCircle, Pin, PinOff } from "lucide-react";
+import { Archive, Circle, Layers, MessageCircle, Pin, PinOff } from "lucide-react";
 import { memo, useState, type MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 
+import type { ConversationKind } from "../../../../../shared/features/agent/types";
 import type { TurnResult } from "../hooks/use-unseen-turn-result";
 
 import { Spinner } from "../../../components/ui/spinner";
 import { useRelativeTime } from "../../../hooks/use-relative-time";
 import { cn } from "../../../lib/utils";
 import { useConfigStore } from "../../config/store";
-import { useProjectStore } from "../../project/store";
+import { useGroupsStore, useProjectStore } from "../../project/store";
 import { useAgentStore } from "../store";
 import { isImeComposingKeyEvent } from "../utils/keyboard";
 import { SessionActionsMenu } from "./session-actions-menu";
@@ -36,6 +37,9 @@ interface SessionItemProps {
   optionHeld?: boolean;
   onClick: () => void;
   projectPath: string;
+  kind?: ConversationKind;
+  groupId?: string;
+  focusProjectId?: string;
 }
 
 export const SessionItem = memo(function SessionItem({
@@ -54,6 +58,8 @@ export const SessionItem = memo(function SessionItem({
   optionHeld = false,
   onClick,
   projectPath,
+  kind,
+  groupId,
 }: SessionItemProps) {
   const { t } = useTranslation();
   const archiveSession = useProjectStore((s) => s.archiveSession);
@@ -62,6 +68,9 @@ export const SessionItem = memo(function SessionItem({
   const multiProjectSupport = useConfigStore((s) => s.multiProjectSupport);
   const sidebarOrganize = useConfigStore((s) => s.sidebarOrganize);
   const showSessionInitStatus = useConfigStore((s) => s.showSessionInitStatus);
+  const groups = useGroupsStore((s) => s.groups);
+  const groupName =
+    kind === "group" && groupId ? groups.find((g) => g.id === groupId)?.name : undefined;
 
   const [isEditing, setIsEditing] = useState(false);
   const [editingValue, setEditingValue] = useState("");
@@ -192,6 +201,8 @@ export const SessionItem = memo(function SessionItem({
                   multiProjectSupport && sidebarOrganize === "byProject" ? "invisible" : undefined
                 }
               />
+            ) : kind === "group" ? (
+              <Layers size={14} strokeWidth={1.5} className="text-muted-foreground" />
             ) : (
               <HugeiconsIcon
                 icon={Comment01Icon}
@@ -223,8 +234,13 @@ export const SessionItem = memo(function SessionItem({
               onFocus={(e) => e.target.select()}
             />
           ) : (
-            <span className="flex-1 text-sm truncate text-left">
-              {isRestoring ? "Restoring..." : displayTitle}
+            <span className="flex-1 text-sm truncate text-left min-w-0 flex items-center gap-1.5">
+              <span className="truncate">{isRestoring ? "Restoring..." : displayTitle}</span>
+              {groupName && (
+                <span className="shrink-0 rounded-full bg-muted px-1.5 py-px text-[10px] text-muted-foreground/60 leading-none">
+                  {groupName}
+                </span>
+              )}
             </span>
           )}
           <span

@@ -22,10 +22,12 @@ import type { Query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 
 import type { ClaudeCodeUIMessage } from "../../../../shared/claude-code/types";
-import type { ModelScope } from "../../../../shared/features/agent/types";
+import type { ConversationKind, ModelScope } from "../../../../shared/features/agent/types";
 import type { ConfigStore } from "../../config/config-store";
+import type { GroupService } from "../../project/group-service";
 import type { ProjectStore } from "../../project/project-store";
 import type { InitContext } from "./init";
+import type { GroupMemberSnapshot } from "./types";
 
 import { sessionMessagesToUIMessages } from "../utils/session-messages-to-ui-messages";
 import { initSessionWithTimeout } from "./init";
@@ -40,16 +42,24 @@ import { resolveProviderAndModelForCreate, resolveProviderAndModelForLoad } from
 export interface FacadeContext {
   configStore: ConfigStore;
   projectStore: ProjectStore;
+  groupService: GroupService;
   initContext: InitContext;
   log: (fmt: string, ...args: unknown[]) => void;
+}
+
+export interface CreateSessionParams {
+  cwd: string;
+  model?: string;
+  explicitProviderId?: string | null;
+  kind?: ConversationKind;
+  groupId?: string;
+  focusProjectId?: string;
 }
 
 /** Start a new session. */
 export async function createSession(
   ctx: FacadeContext,
-  cwd: string,
-  model?: string,
-  explicitProviderId?: string | null,
+  params: CreateSessionParams,
 ): Promise<
   {
     sessionId: string;
@@ -58,19 +68,51 @@ export async function createSession(
     providerId?: string;
   } & Awaited<ReturnType<Query["initializationResult"]>>
 > {
-  const { configStore, projectStore, initContext, log } = ctx;
+  const { cwd, model, explicitProviderId, kind, groupId, focusProjectId } = params;
+  const { configStore, projectStore, groupService, initContext, log } = ctx;
   const sessionId = randomUUID();
+
+  // Resolve group context
+  let groupMembers: GroupMemberSnapshot[] | undefined;
+  let effectiveCwd = cwd;
+  let effectiveKind: ConversationKind = kind ?? "single";
+  let effectiveFocusProjectId = focusProjectId;
+
+  if (effectiveKind === "group" && groupId && focusProjectId) {
+    const group = groupService.getGroup(groupId);
+    if (!group) {
+      throw Object.assign(new Error(`Group not found: ${groupId}`), { code: "GROUP_NOT_FOUND" });
+    }
+    const expanded = groupService.expandMembers(group);
+    groupMembers = expanded;
+
+    // Validate focus project
+    const focus = expanded.find((m) => m.projectId === focusProjectId);
+    if (!focus) {
+      throw Object.assign(new Error(`Focus project ${focusProjectId} not in group ${groupId}`), {
+        code: "FOCUS_NOT_IN_GROUP",
+      });
+    }
+    if (focus.missing) {
+      throw Object.assign(new Error(`Focus project ${focus.name} path is missing`), {
+        code: "FOCUS_PATH_MISSING",
+      });
+    }
+    effectiveCwd = focus.path!;
+  }
+
   log(
-    "createSession: sessionId=%s cwd=%s model=%s explicitProviderId=%s",
+    "createSession: sessionId=%s kind=%s cwd=%s model=%s explicitProviderId=%s",
     sessionId,
-    cwd,
+    effectiveKind,
+    effectiveCwd,
     model ?? "(auto)",
     explicitProviderId ?? "(none)",
   );
 
   const { provider, modelSetting } = await resolveProviderAndModelForCreate({
     sessionId,
-    cwd,
+    cwd: effectiveCwd,
     model,
     explicitProviderId,
     configStore,
@@ -85,9 +127,13 @@ export async function createSession(
     provider?.id ?? "(none)",
   );
 
-  const initResult = await initSessionWithTimeout(initContext, sessionId, cwd, {
+  const initResult = await initSessionWithTimeout(initContext, sessionId, effectiveCwd, {
     model: modelSetting?.model,
     provider,
+    kind: effectiveKind,
+    groupId,
+    focusProjectId: effectiveFocusProjectId,
+    groupMembers,
   });
 
   return {

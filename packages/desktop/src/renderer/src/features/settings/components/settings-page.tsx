@@ -7,6 +7,7 @@ import { useSettingsStore } from "../store";
 import { AboutPanel } from "./panels/about-panel";
 import { AgentsPanel } from "./panels/agents-panel";
 import { GeneralPanel } from "./panels/general-panel";
+import { GroupsPanel } from "./panels/groups-panel";
 import { KeybindingsPanel } from "./panels/keybindings-panel";
 import { ProvidersPanel } from "./panels/providers-panel";
 import { RulesPanel } from "./panels/rules-panel";
@@ -61,6 +62,7 @@ export const SettingsPage = () => {
           {activeMenu === "agents" && <AgentsPanel />}
           {activeMenu === "rules" && <RulesPanel />}
           {activeMenu === "general" && <GeneralPanel />}
+          {activeMenu === "groups" && <GroupsPanel />}
           {activeMenu === "keybindings" && <KeybindingsPanel />}
           {activeMenu === "providers" && <ProvidersPanel />}
           {activeMenu === "about" && <AboutPanel />}

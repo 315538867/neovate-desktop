@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
+import type { ProjectGroup, ProjectGroupMember } from "../../../shared/features/project/types";
+
 import { PLAYGROUND_PROJECT_ID } from "../../../shared/features/project/constants";
 import { projectContract } from "../../../shared/features/project/contract";
 import { defineRouter } from "../../core/router-factory";
@@ -87,7 +89,13 @@ export const projectRouter = os.project.router({
       throw new ORPCError("BAD_REQUEST", { message: "Cannot remove the playground project" });
     }
     log("remove project", { id: input.id });
+    // Soft hint: check if project is referenced by any groups (does NOT block deletion).
+    const blockedBy = context.projectStore.findGroupsByProject(input.id);
     context.projectStore.remove(input.id);
+    if (blockedBy.length > 0) {
+      return { blockedBy };
+    }
+    return;
   }),
 
   setActive: os.project.setActive.handler(({ input, context }) => {
@@ -173,5 +181,144 @@ export const projectRouter = os.project.router({
   reorderProjects: os.project.reorderProjects.handler(({ input, context }) => {
     log("reorder projects", { projectIds: input.projectIds });
     context.projectStore.reorder(input.projectIds);
+  }),
+
+  // ── 分组 ──────────────────────────────────────────────
+  groups: os.project.groups.router({
+    list: os.project.groups.list.handler(({ context }) => {
+      return context.projectStore.getGroups();
+    }),
+
+    create: os.project.groups.create.handler(({ input, context }) => {
+      log("create group", { name: input.name, members: input.members.length });
+      // playground project cannot join any group
+      for (const m of input.members) {
+        if (m.projectId === PLAYGROUND_PROJECT_ID) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: "Playground project cannot join a group",
+          });
+        }
+        if (!context.projectStore.get(m.projectId)) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: `Project not found: ${m.projectId}`,
+          });
+        }
+      }
+
+      const now = new Date().toISOString();
+      const group: ProjectGroup = {
+        id: randomUUID(),
+        name: input.name,
+        members: input.members as ProjectGroupMember[],
+        createdAt: now,
+        lastUpdatedAt: now,
+      };
+      context.projectStore.addGroup(group);
+      return group;
+    }),
+
+    update: os.project.groups.update.handler(({ input, context }) => {
+      log("update group", { id: input.id });
+      const existing = context.projectStore.getGroup(input.id);
+      if (!existing) {
+        throw new ORPCError("BAD_REQUEST", { message: `Group not found: ${input.id}` });
+      }
+      const updates: Partial<Pick<ProjectGroup, "name" | "members">> = {};
+      if (input.name !== undefined) updates.name = input.name;
+      if (input.members !== undefined) {
+        // Validate all member projects exist
+        for (const m of input.members) {
+          if (m.projectId === PLAYGROUND_PROJECT_ID) {
+            throw new ORPCError("BAD_REQUEST", {
+              message: "Playground project cannot join a group",
+            });
+          }
+          if (!context.projectStore.get(m.projectId)) {
+            throw new ORPCError("BAD_REQUEST", {
+              message: `Project not found: ${m.projectId}`,
+            });
+          }
+        }
+        updates.members = input.members as ProjectGroupMember[];
+      }
+      context.projectStore.updateGroup(input.id, updates);
+      context.sessionManager.onGroupChanged(input.id);
+      return context.projectStore.getGroup(input.id)!;
+    }),
+
+    remove: os.project.groups.remove.handler(({ input, context }) => {
+      log("remove group", { id: input.id });
+      const existing = context.projectStore.getGroup(input.id);
+      if (!existing) {
+        throw new ORPCError("BAD_REQUEST", { message: `Group not found: ${input.id}` });
+      }
+
+      // Block deletion if active group conversations exist
+      const blockingSessions = context.sessionManager.listActiveByGroup(input.id);
+      if (blockingSessions.length > 0) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: `Cannot delete group with active conversations (${blockingSessions.length} active)`,
+          data: { blockingSessions },
+        });
+      }
+
+      context.projectStore.removeGroup(input.id);
+      return { success: true };
+    }),
+
+    reorder: os.project.groups.reorder.handler(({ input, context }) => {
+      log("reorder groups", { groupIds: input.groupIds });
+      context.projectStore.reorderGroups(input.groupIds);
+    }),
+
+    addMember: os.project.groups.addMember.handler(({ input, context }) => {
+      const group = context.projectStore.getGroup(input.groupId);
+      if (!group) {
+        throw new ORPCError("BAD_REQUEST", { message: `Group not found: ${input.groupId}` });
+      }
+      if (input.member.projectId === PLAYGROUND_PROJECT_ID) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "Playground project cannot join a group",
+        });
+      }
+      if (!context.projectStore.get(input.member.projectId)) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: `Project not found: ${input.member.projectId}`,
+        });
+      }
+      context.projectStore.addGroupMember(input.groupId, input.member as ProjectGroupMember);
+      context.sessionManager.onGroupChanged(input.groupId);
+    }),
+
+    updateMember: os.project.groups.updateMember.handler(({ input, context }) => {
+      const group = context.projectStore.getGroup(input.groupId);
+      if (!group) {
+        throw new ORPCError("BAD_REQUEST", { message: `Group not found: ${input.groupId}` });
+      }
+      if (!group.members.some((m) => m.projectId === input.projectId)) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: `Member not found in group: ${input.projectId}`,
+        });
+      }
+      context.projectStore.updateGroupMemberRole(input.groupId, input.projectId, input.role);
+      context.sessionManager.onGroupChanged(input.groupId);
+    }),
+
+    removeMember: os.project.groups.removeMember.handler(({ input, context }) => {
+      const group = context.projectStore.getGroup(input.groupId);
+      if (!group) {
+        throw new ORPCError("BAD_REQUEST", { message: `Group not found: ${input.groupId}` });
+      }
+      context.projectStore.removeGroupMember(input.groupId, input.projectId);
+      context.sessionManager.onGroupChanged(input.groupId);
+    }),
+
+    reorderMembers: os.project.groups.reorderMembers.handler(({ input, context }) => {
+      const group = context.projectStore.getGroup(input.groupId);
+      if (!group) {
+        throw new ORPCError("BAD_REQUEST", { message: `Group not found: ${input.groupId}` });
+      }
+      context.projectStore.reorderGroupMembers(input.groupId, input.memberProjectIds);
+    }),
   }),
 });

@@ -19,6 +19,7 @@
  */
 
 import type {
+  HookCallback,
   Options,
   Query,
   SDKUserMessage,
@@ -26,10 +27,13 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { EventPublisher } from "@orpc/server";
 
+import debug from "debug";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import type { ClaudeCodeUIEvent } from "../../../../shared/claude-code/types";
+import type { ConversationKind } from "../../../../shared/features/agent/types";
+import type { ProjectGroup } from "../../../../shared/features/project/types";
 import type { Provider } from "../../../../shared/features/provider/types";
 import type { Contributions } from "../../../core/plugin/contributions";
 import type { PowerBlockerService } from "../../../core/power-blocker-service";
@@ -38,6 +42,7 @@ import type { RequestTracker } from "../request-tracker";
 
 import { mergeAgentContributions } from "../../../core/plugin/contributions";
 import { shellEnvService } from "../../../core/shell-service";
+import { renderGroupContext } from "../../project/render-group-context";
 import {
   detectRtkHookInSettings,
   resolveBunPath,
@@ -51,7 +56,8 @@ import {
   createRtkHook,
   createSpawnOverride,
 } from "./lifecycle";
-import { INIT_TIMEOUT_MS, type SessionEntry } from "./types";
+import { checkToolPath } from "./path-guard";
+import { INIT_TIMEOUT_MS, type GroupMemberSnapshot, type SessionEntry } from "./types";
 
 /**
  * The slice of SessionManager that initialization touches. Passing it as
@@ -78,11 +84,34 @@ export interface InitContext {
  */
 export function buildQueryOptions(
   ctx: InitContext,
-  params: { sessionId: string; cwd: string; model?: string },
+  params: {
+    sessionId: string;
+    cwd: string;
+    model?: string;
+    kind?: ConversationKind;
+    groupId?: string;
+    groupMembers?: GroupMemberSnapshot[];
+    focusProjectId?: string;
+    group?: ProjectGroup;
+  },
 ): Options {
-  const { sessionId, cwd, model } = params;
+  const { sessionId, cwd, model, groupMembers, focusProjectId, group } = params;
   const { configStore, sessions, eventPublisher, log } = ctx;
   const resolved = resolveClaudeCodeExecutable(configStore.get("claudeCodeBinPath") || undefined);
+
+  // Build systemPrompt with optional group context append
+  let systemPrompt: Options["systemPrompt"] = {
+    type: "preset",
+    preset: "claude_code",
+  };
+  if (group && groupMembers && focusProjectId) {
+    const focus = groupMembers.find((m) => m.projectId === focusProjectId);
+    if (focus && !focus.missing) {
+      const append = renderGroupContext(group, groupMembers, focus);
+      systemPrompt = { type: "preset", preset: "claude_code", append };
+    }
+  }
+
   return {
     sessionId,
     model,
@@ -94,10 +123,7 @@ export function buildQueryOptions(
     includePartialMessages: true,
     permissionMode: configStore.get("permissionMode") ?? "default",
     promptSuggestions: true,
-    systemPrompt: {
-      type: "preset",
-      preset: "claude_code",
-    },
+    systemPrompt,
     tools: {
       type: "preset",
       preset: "claude_code",
@@ -106,6 +132,12 @@ export function buildQueryOptions(
       const requestId = randomUUID();
       const session = sessions.get(sessionId);
       if (!session) throw new Error(`Unknown session: ${sessionId}`);
+
+      // Path-guard: hard check before user permission flow
+      const guard = checkToolPath(toolName, input as Record<string, unknown>, session);
+      if (!guard.allow) {
+        return { behavior: "deny", message: guard.reason };
+      }
 
       const { promise, resolve } = Promise.withResolvers<PermissionResult>();
       let settled = false;
@@ -155,6 +187,11 @@ export async function initSession(
     model?: string;
     resume?: string;
     provider?: Provider;
+    kind?: ConversationKind;
+    groupId?: string;
+    focusProjectId?: string;
+    groupMembers?: GroupMemberSnapshot[];
+    group?: ProjectGroup;
   },
 ): Promise<Awaited<ReturnType<Query["initializationResult"]>>> {
   const { configStore, requestTracker, log, rtkLog } = ctx;
@@ -167,6 +204,8 @@ export async function initSession(
       timer: ReturnType<typeof setTimeout>;
     }
   >();
+
+  const kind: ConversationKind = opts?.kind ?? "single";
 
   const t0 = performance.now();
   const shellEnv = await shellEnvService.getEnv();
@@ -241,6 +280,10 @@ export async function initSession(
     sessionId,
     cwd,
     model: opts?.model,
+    kind,
+    groupMembers: opts?.groupMembers,
+    focusProjectId: opts?.focusProjectId,
+    group: opts?.group,
   });
   // Merge plugin-contributed hooks and MCP servers
   const merged = mergeAgentContributions(ctx.getAgentContributions());
@@ -252,6 +295,63 @@ export async function initSession(
   );
   if (registerRtkHook) {
     (merged.hooks.PreToolUse ??= []).push({ matcher: "Bash", hooks: [rtkHook] });
+  }
+
+  // Focus hint hook for group sessions: inject pendingHint as
+  // additionalContext on UserPromptSubmit, then clear it.
+  if (kind === "group") {
+    const focusHintHook: HookCallback = async (input) => {
+      if (input.hook_event_name !== "UserPromptSubmit") return { continue: true };
+      const entry = ctx.sessions.get(sessionId);
+      if (!entry?.pendingHint) return { continue: true };
+      const hint = entry.pendingHint;
+      entry.pendingHint = undefined;
+      return {
+        hookSpecificOutput: {
+          hookEventName: "UserPromptSubmit",
+          additionalContext: hint,
+        },
+      };
+    };
+    (merged.hooks.UserPromptSubmit ??= []).push({ hooks: [focusHintHook] });
+
+    // Bash PreToolUse soft-log for group sessions: detect write-like
+    // commands that may cross project boundaries. Never blocks — only
+    // logs to debug for off-line analysis and metric collection.
+    const bashOofLog = debug("neovate:agent:group:bash-out-of-focus");
+    const bashOofHook: HookCallback = async (input) => {
+      if (input.hook_event_name !== "PreToolUse") return { continue: true };
+      const ti = input.tool_input as { command?: string };
+      const cmd = ti?.command;
+      if (typeof cmd !== "string" || cmd.length === 0) return { continue: true };
+
+      const patterns = [
+        /\bsed\s+(-i|--in-place)\b/,
+        /\b(?:cp|mv)\b.+/,
+        /\brm\s+(-[rf]+\s+)*\S/,
+        /\btee\b/,
+        /\becho\b.*[^<>]\s*>\s*\S/,
+        /\bawk\b.*\{.*print.*>/,
+        /\bdd\b.+\bof=/,
+      ];
+
+      for (const pat of patterns) {
+        if (pat.test(cmd)) {
+          bashOofLog(
+            "sessionId=%s groupId=%s focusProjectId=%s command=%s pattern=%s",
+            sessionId,
+            opts?.groupId ?? "-",
+            opts?.focusProjectId ?? "-",
+            cmd.slice(0, 200),
+            pat.source,
+          );
+          break;
+        }
+      }
+
+      return { continue: true };
+    };
+    (merged.hooks.PreToolUse ??= []).push({ matcher: "Bash", hooks: [bashOofHook] });
   }
 
   const spawnOverride = createSpawnOverride({
@@ -294,6 +394,10 @@ export async function initSession(
     consumeExited: false,
     uiToSdkMessageIds: new Map(),
     pendingRequests,
+    kind,
+    groupId: opts?.groupId,
+    focusProjectId: opts?.focusProjectId,
+    groupMembers: opts?.groupMembers,
   });
   log(
     "initSession: TIMING import=%dms query=%dms sessionId=%s",
@@ -332,6 +436,11 @@ export async function initSessionWithTimeout(
     model?: string;
     resume?: string;
     provider?: Provider;
+    kind?: ConversationKind;
+    groupId?: string;
+    focusProjectId?: string;
+    groupMembers?: GroupMemberSnapshot[];
+    group?: ProjectGroup;
   },
 ): Promise<Awaited<ReturnType<Query["initializationResult"]>>> {
   const { log } = ctx;

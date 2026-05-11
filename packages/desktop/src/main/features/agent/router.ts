@@ -71,13 +71,22 @@ export const sessionRouter = os.session.router({
   claudeCode: os.session.claudeCode.router({
     createSession: os.session.claudeCode.createSession.handler(async ({ input, context }) => {
       agentLog(
-        "claudeCode.createSession: cwd=%s model=%s providerId=%s",
+        "claudeCode.createSession: cwd=%s model=%s providerId=%s kind=%s groupId=%s",
         input.cwd,
         input.model,
         input.providerId,
+        input.kind,
+        input.groupId,
       );
       try {
-        return await context.sessionManager.createSession(input.cwd, input.model, input.providerId);
+        return await context.sessionManager.createSession({
+          cwd: input.cwd,
+          model: input.model,
+          explicitProviderId: input.providerId,
+          kind: input.kind,
+          groupId: input.groupId,
+          focusProjectId: input.focusProjectId,
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to create session";
         throw new ORPCError("BAD_GATEWAY", { defined: true, message });
@@ -85,7 +94,13 @@ export const sessionRouter = os.session.router({
     }),
 
     send: os.session.claudeCode.send.handler(async ({ input, context }) => {
-      await context.sessionManager.send(input.sessionId, input.message);
+      try {
+        await context.sessionManager.send(input.sessionId, input.message);
+      } catch (error) {
+        if (error instanceof ORPCError) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        throw new ORPCError("BAD_GATEWAY", { defined: true, message });
+      }
     }),
 
     subscribe: os.session.claudeCode.subscribe.handler(async function* ({
@@ -201,6 +216,11 @@ export const sessionRouter = os.session.router({
     await writeFile(filePath, input.plan, "utf8");
     agentLog("savePlan: saved to %s", filePath);
     return { path: filePath };
+  }),
+
+  setFocusProject: os.session.setFocusProject.handler(({ input, context }) => {
+    agentLog("setFocusProject: sessionId=%s projectId=%s", input.sessionId, input.projectId);
+    context.sessionManager.setFocusProject(input.sessionId, input.projectId);
   }),
 
   setModelSetting: os.session.setModelSetting.handler(async ({ input, context }) => {

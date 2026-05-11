@@ -1,4 +1,4 @@
-import { ArrowLeft, BookOpen, Bot, HelpCircle, Keyboard, Server, Bolt } from "lucide-react";
+import { ArrowLeft, BookOpen, Bot, HelpCircle, Keyboard, Layers, Server, Bolt } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { SettingsMenuId } from "../store";
@@ -16,6 +16,7 @@ const menuItems: MenuItem[] = [
   { id: "agents", icon: Bot },
   { id: "providers", icon: Server },
   { id: "rules", icon: BookOpen },
+  { id: "groups", icon: Layers },
   { id: "keybindings", icon: Keyboard },
   { id: "about", icon: HelpCircle },
 ];
@@ -25,6 +26,7 @@ const MENU_LABEL_KEYS = {
   agents: "settings.agents",
   providers: "settings.providers",
   rules: "settings.rules",
+  groups: "settings.groups",
   keybindings: "settings.keybindings",
   about: "settings.about",
 } as const satisfies Record<SettingsMenuId, string>;

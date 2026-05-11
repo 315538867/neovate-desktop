@@ -1,10 +1,10 @@
 import type { LucideIcon } from "lucide-react";
 
-import { Puzzle, SquarePen, Wand2 } from "lucide-react";
+import { Puzzle, Wand2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { layoutStore, useLayoutStore } from "../../../components/app-layout/store";
-import { useNewSession } from "../hooks/use-new-session";
+import { NewConversationMenu } from "./new-conversation-menu";
 
 function SidebarActionButton({
   icon: Icon,
@@ -41,18 +41,12 @@ function SidebarActionButton({
 
 export function PanelTriggerGroup({ projectPath }: { projectPath?: string }) {
   const { t } = useTranslation();
-  const { createNewSession } = useNewSession();
   const fullRightPanelId = useLayoutStore((s) => s.fullRightPanelId);
   const openFullRightPanel = useLayoutStore((s) => s.openFullRightPanel);
 
   return (
     <div className="mb-2.5 flex flex-col gap-0.5">
-      <SidebarActionButton
-        icon={SquarePen}
-        label={t("session.newChat")}
-        onClick={() => projectPath && createNewSession(projectPath)}
-        disabled={!projectPath}
-      />
+      <NewConversationMenu projectPath={projectPath} />
       <SidebarActionButton
         icon={Wand2}
         label={t("settings.skills")}
