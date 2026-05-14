@@ -39,7 +39,6 @@ interface SessionItemProps {
   projectPath: string;
   kind?: ConversationKind;
   groupId?: string;
-  focusProjectId?: string;
 }
 
 export const SessionItem = memo(function SessionItem({

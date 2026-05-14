@@ -4,29 +4,13 @@ import { useCallback, useState } from "react";
 import type {
   ProjectGroup,
   ProjectGroupMember,
-  ProjectRole,
 } from "../../../../../shared/features/project/types";
 
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../../../components/ui/select";
 import { client } from "../../../orpc";
 import { useProjectStore } from "../store";
-
-const ROLES: { value: ProjectRole; label: string }[] = [
-  { value: "library", label: "library (库)" },
-  { value: "consumer", label: "consumer (消费方)" },
-  { value: "shared", label: "shared (共享)" },
-  { value: "service", label: "service (服务)" },
-  { value: "tool", label: "tool (工具)" },
-  { value: "other", label: "other (其他)" },
-];
+import { MemberPicker } from "./member-picker";
 
 interface GroupDetailProps {
   group?: ProjectGroup;
@@ -40,15 +24,20 @@ export function GroupDetail({ group, onBack, onSaved }: GroupDetailProps) {
   const [members, setMembers] = useState<ProjectGroupMember[]>(group?.members ?? []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const allProjects = useProjectStore((s) => s.projects);
 
-  const handleAddMember = useCallback(() => {
-    const unadded = allProjects.filter((p) => !members.some((m) => m.projectId === p.id));
-    if (unadded.length > 0) {
-      setMembers([...members, { projectId: unadded[0]!.id, role: "consumer" as ProjectRole }]);
-    }
-  }, [allProjects, members]);
+  const handlePickerConfirm = useCallback(
+    (newIds: string[]) => {
+      // 保留原有成员 role / 顺序，新成员追加在末尾，role 默认 undefined
+      const additions = newIds
+        .filter((id) => !members.some((m) => m.projectId === id))
+        .map<ProjectGroupMember>((id) => ({ projectId: id, role: undefined }));
+      setMembers([...members, ...additions]);
+    },
+    [members],
+  );
 
   const handleRemoveMember = useCallback(
     (projectId: string) => {
@@ -58,8 +47,13 @@ export function GroupDetail({ group, onBack, onSaved }: GroupDetailProps) {
   );
 
   const handleRoleChange = useCallback(
-    (projectId: string, role: ProjectRole) => {
-      setMembers(members.map((m) => (m.projectId === projectId ? { ...m, role } : m)));
+    (projectId: string, role: string) => {
+      const trimmed = role.trim();
+      setMembers(
+        members.map((m) =>
+          m.projectId === projectId ? { ...m, role: trimmed ? trimmed : undefined } : m,
+        ),
+      );
     },
     [members],
   );
@@ -125,14 +119,14 @@ export function GroupDetail({ group, onBack, onSaved }: GroupDetailProps) {
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label className="text-sm text-muted-foreground">成员 ({members.length})</label>
-          <Button variant="ghost" size="sm" onClick={handleAddMember}>
+          <Button variant="ghost" size="sm" onClick={() => setPickerOpen(true)}>
             + 添加项目
           </Button>
         </div>
 
         {members.length === 0 ? (
           <div className="text-center py-4 text-sm text-muted-foreground border border-dashed rounded-lg">
-            拖入项目或点击"+ 添加项目"
+            点击 "+ 添加项目" 选择项目加入分组
           </div>
         ) : (
           <div className="space-y-2">
@@ -148,21 +142,13 @@ export function GroupDetail({ group, onBack, onSaved }: GroupDetailProps) {
                     {project?.pathMissing && <span className="text-warning ml-1">(路径丢失)</span>}
                     {!project && <span className="text-destructive ml-1">(项目已删除)</span>}
                   </span>
-                  <Select
-                    value={member.role}
-                    onValueChange={(v) => handleRoleChange(member.projectId, v as ProjectRole)}
-                  >
-                    <SelectTrigger className="w-36 h-7 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ROLES.map((r) => (
-                        <SelectItem key={r.value} value={r.value}>
-                          {r.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Input
+                    className="w-44 h-7 text-xs"
+                    placeholder="角色（可选）"
+                    maxLength={60}
+                    value={member.role ?? ""}
+                    onChange={(e) => handleRoleChange(member.projectId, e.target.value)}
+                  />
                   <button
                     className="p-1 text-muted-foreground hover:text-destructive cursor-pointer"
                     onClick={() => handleRemoveMember(member.projectId)}
@@ -202,6 +188,14 @@ export function GroupDetail({ group, onBack, onSaved }: GroupDetailProps) {
           </Button>
         </div>
       </div>
+
+      <MemberPicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        projects={allProjects}
+        existingMemberIds={members.map((m) => m.projectId)}
+        onConfirm={handlePickerConfirm}
+      />
     </div>
   );
 }

@@ -74,7 +74,7 @@ export type ChatSession = {
   tasks: Map<string, TaskState>;
   kind?: ConversationKind;
   groupId?: string;
-  focusProjectId?: string;
+  elevatedProjectIds?: string[];
 };
 
 export type RewindUndoBuffer = {
@@ -108,7 +108,6 @@ type AgentState = {
       isNew?: boolean;
       kind?: ConversationKind;
       groupId?: string;
-      focusProjectId?: string;
     },
   ) => void;
   createBackgroundSession: (
@@ -120,7 +119,6 @@ type AgentState = {
       isNew?: boolean;
       kind?: ConversationKind;
       groupId?: string;
-      focusProjectId?: string;
     },
   ) => void;
   removeSession: (sessionId: string) => void;
@@ -130,7 +128,8 @@ type AgentState = {
   setCurrentModel: (sessionId: string, model: string) => void;
   setModelScope: (sessionId: string, scope: ModelScope | undefined) => void;
   setProviderId: (sessionId: string, providerId: string | undefined) => void;
-  setFocusProject: (sessionId: string, focusProjectId: string) => void;
+  addElevatedProject: (sessionId: string, projectId: string) => Promise<void>;
+  revokeElevation: (sessionId: string, projectId: string) => Promise<void>;
   setPermissionMode: (sessionId: string, mode: PermissionMode) => void;
   setSessionUsage: (
     sessionId: string,
@@ -229,7 +228,6 @@ export const useAgentStore = create<AgentState>()(
           tasks: new Map(),
           kind: meta?.kind,
           groupId: meta?.groupId,
-          focusProjectId: meta?.focusProjectId,
         });
         state.activeSessionId = sessionId;
         state._sessionsMetaVersion += 1;
@@ -252,7 +250,6 @@ export const useAgentStore = create<AgentState>()(
           tasks: new Map(),
           kind: meta?.kind,
           groupId: meta?.groupId,
-          focusProjectId: meta?.focusProjectId,
         });
         state._sessionsMetaVersion += 1;
         storeLog("createBackgroundSession: totalSessions=%d (not activated)", state.sessions.size);
@@ -397,15 +394,53 @@ export const useAgentStore = create<AgentState>()(
       });
     },
 
-    setFocusProject: (sessionId, focusProjectId) => {
-      storeLog("setFocusProject: sid=%s focus=%s", sessionId, focusProjectId);
+    addElevatedProject: async (sessionId, projectId) => {
+      storeLog("addElevatedProject: sid=%s projectId=%s", sessionId, projectId);
+      // Optimistic update
       set((state) => {
         const session = state.sessions.get(sessionId);
         if (session) {
-          session.focusProjectId = focusProjectId;
+          if (!session.elevatedProjectIds) {
+            session.elevatedProjectIds = [];
+          }
+          if (!session.elevatedProjectIds.includes(projectId)) {
+            session.elevatedProjectIds.push(projectId);
+          }
           state._sessionsMetaVersion += 1;
         }
       });
+      // Call main process
+      const res = await client.agent.session.claudeCode.dispatch({
+        sessionId,
+        dispatch: { kind: "elevate_project", projectId },
+      });
+      if (res.kind !== "elevate_project" || !res.ok) {
+        // Revert on failure
+        set((state) => {
+          const session = state.sessions.get(sessionId);
+          if (session?.elevatedProjectIds) {
+            session.elevatedProjectIds = session.elevatedProjectIds.filter((p) => p !== projectId);
+            state._sessionsMetaVersion += 1;
+          }
+        });
+      }
+    },
+
+    revokeElevation: async (sessionId, projectId) => {
+      storeLog("revokeElevation: sid=%s projectId=%s", sessionId, projectId);
+      const res = await client.agent.session.claudeCode.dispatch({
+        sessionId,
+        dispatch: { kind: "revoke_elevation", projectId },
+      });
+      if (res.kind === "revoke_elevation" && res.ok) {
+        set((state) => {
+          const session = state.sessions.get(sessionId);
+          if (session?.elevatedProjectIds) {
+            session.elevatedProjectIds = session.elevatedProjectIds.filter((p) => p !== projectId);
+            state._sessionsMetaVersion += 1;
+          }
+        });
+      }
     },
 
     setPermissionMode: (sessionId, mode) => {

@@ -35,8 +35,6 @@ export const UnifiedSessionItem = memo(
     const isNew = item.kind === "memory" ? item.session.isNew : false;
     const kind = item.kind === "memory" ? item.session.kind : item.info.kind;
     const groupId = item.kind === "memory" ? item.session.groupId : item.info.groupId;
-    const focusProjectId =
-      item.kind === "memory" ? item.session.focusProjectId : item.info.focusProjectId;
     const { isStreaming, hasPendingRequests } = useSessionChatStatus(sessionId);
     const turnResult = useUnseenTurnResult(sessionId);
 
@@ -75,7 +73,6 @@ export const UnifiedSessionItem = memo(
         projectPath={item.projectPath}
         kind={kind}
         groupId={groupId}
-        focusProjectId={focusProjectId}
       />
     );
   },

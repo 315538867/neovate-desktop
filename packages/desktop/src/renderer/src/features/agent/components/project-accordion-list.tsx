@@ -64,7 +64,17 @@ const ProjectSessions = memo(function ProjectSessions({ project }: { project: Pr
   const [restoring, setRestoring] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(DEFAULT_SESSION_LIMIT);
 
-  const items = useFilteredSessions({ projectPath: project.path, filter: "unpinned" });
+  const allItems = useFilteredSessions({ projectPath: project.path, filter: "unpinned" });
+
+  // Exclude group sessions — they are rendered by GroupSessionsList
+  const items = useMemo(
+    () =>
+      allItems.filter((item) => {
+        const kind = item.kind === "memory" ? item.session.kind : item.info.kind;
+        return kind !== "group";
+      }),
+    [allItems],
+  );
 
   const visibleItems = items.slice(0, visibleCount);
   const remainingCount = items.length - visibleCount;

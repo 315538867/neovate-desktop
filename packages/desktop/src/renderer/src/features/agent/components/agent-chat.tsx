@@ -129,6 +129,12 @@ export function AgentChat() {
     const session = s.sessions.get(s.activeSessionId);
     return session != null && !session.isNew;
   });
+  const pendingGroupSession = useAgentStore((s) => {
+    if (!s.activeSessionId) return null;
+    const session = s.sessions.get(s.activeSessionId);
+    if (session?.kind === "group" && session.isNew) return session;
+    return null;
+  });
   const sessionInitError = useAgentStore((s) => s.sessionInitError);
   const setSessionInitError = useAgentStore((s) => s.setSessionInitError);
 
@@ -276,6 +282,7 @@ export function AgentChat() {
   if (!hasActiveChat) {
     return (
       <div className="relative flex h-full flex-col">
+        {pendingGroupSession && <GroupFocusBar session={pendingGroupSession} />}
         <WelcomePanel hasProject />
         <MessageInput
           onSend={handleSend}

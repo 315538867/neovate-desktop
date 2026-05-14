@@ -21,10 +21,10 @@ type Props = {
   pendingCount: number;
   pendingIndex: number;
   permissionMode: PermissionMode;
-  onResolve: (result: PermissionResult) => void;
+  onResolve: (result: PermissionResult, extra?: { elevation?: { projectId: string } }) => void;
 };
 
-type OptionValue = "yes" | "yes-always" | "no" | "no-feedback";
+type OptionValue = "yes" | "yes-always" | "no" | "no-feedback" | "allow-session";
 
 export function PermissionRequestDialog({
   request,
@@ -64,6 +64,10 @@ export function PermissionRequestDialog({
     });
   }, [onResolve, suggestions]);
 
+  const elevation = (request as Record<string, unknown>).elevation as
+    | { projectId: string; projectName: string }
+    | undefined;
+
   const handleDeny = useCallback(
     (message?: string) => {
       onResolve({
@@ -74,6 +78,11 @@ export function PermissionRequestDialog({
     [onResolve],
   );
 
+  const handleAllowSession = useCallback(() => {
+    if (!elevation) return;
+    onResolve({ behavior: "allow" }, { elevation: { projectId: elevation.projectId } });
+  }, [onResolve, elevation]);
+
   const handleOptionClick = useCallback(
     (value: OptionValue) => {
       switch (value) {
@@ -82,6 +91,9 @@ export function PermissionRequestDialog({
           break;
         case "yes-always":
           handleAlwaysAllow();
+          break;
+        case "allow-session":
+          handleAllowSession();
           break;
         case "no":
           handleDeny();
@@ -150,6 +162,12 @@ export function PermissionRequestDialog({
           e.preventDefault();
           handleDeny();
           break;
+        case "s":
+          if (elevation) {
+            e.preventDefault();
+            handleAllowSession();
+          }
+          break;
       }
     };
 
@@ -158,8 +176,10 @@ export function PermissionRequestDialog({
   }, [
     feedbackExpanded,
     hasSuggestions,
+    elevation,
     handleAllow,
     handleAlwaysAllow,
+    handleAllowSession,
     handleDeny,
     handleFeedbackSubmit,
   ]);
@@ -183,6 +203,16 @@ export function PermissionRequestDialog({
             subtitle: persistencePath
               ? t("permission.savesTo", { path: persistencePath })
               : undefined,
+          },
+        ]
+      : []),
+    ...(elevation
+      ? [
+          {
+            value: "allow-session" as const,
+            label: t("permission.allowOnceInSession", { name: elevation.projectName }),
+            shortcut: "s",
+            subtitle: t("permission.allowOnceInSessionSubtitle", { name: elevation.projectName }),
           },
         ]
       : []),

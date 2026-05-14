@@ -56,7 +56,6 @@ export class ClaudeCodeChatManager {
       providerId?: string | null;
       kind?: "single" | "group";
       groupId?: string;
-      focusProjectId?: string;
     },
   ) {
     const { sessionId, currentModel, modelScope, providerId, ...capabilities } =
@@ -65,7 +64,6 @@ export class ClaudeCodeChatManager {
         providerId: opts?.providerId,
         kind: opts?.kind,
         groupId: opts?.groupId,
-        focusProjectId: opts?.focusProjectId,
       });
     const chat = new ClaudeCodeChat({
       id: sessionId,

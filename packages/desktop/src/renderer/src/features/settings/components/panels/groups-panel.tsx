@@ -35,7 +35,7 @@ export const GroupsPanel = () => {
           <li>其他成员项目对 Read/Grep/Glob 完全开放，AI 可主动跨项目探索代码关系。</li>
           <li>切换聚焦项目：点击组对话顶部的成员 chip 即可（无需重启对话）。</li>
           <li>
-            分组仅存储成员和角色（library/consumer/shared/service/tool/other），无额外配置项。
+            分组只记录成员项目和可选的角色文本（自由填写、可留空），用于在 AI 提示中给出语义提示。
           </li>
           <li>删除项目不会自动从分组中移除，成员将标记为"路径丢失"，可在这里手动清理。</li>
         </ul>

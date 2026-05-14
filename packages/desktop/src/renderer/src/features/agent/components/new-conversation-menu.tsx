@@ -1,4 +1,4 @@
-import { ChevronDown, Layers, Lock, SquarePen } from "lucide-react";
+import { ChevronDown, Layers, SquarePen } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -19,12 +19,10 @@ export function NewConversationMenu({ projectPath }: { projectPath?: string }) {
   useEffect(() => {
     void loadGroups();
   }, [loadGroups]);
-  const [step, setStep] = useState<"menu" | "selectGroup" | "selectFocus">("menu");
-  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [step, setStep] = useState<"menu" | "selectGroup">("menu");
   const [creating, setCreating] = useState(false);
 
   const hasGroups = groups.length > 0;
-  const selectedGroup = groups.find((g) => g.id === selectedGroupId);
 
   const handleNewSingleSession = () => {
     setOpen(false);
@@ -32,38 +30,27 @@ export function NewConversationMenu({ projectPath }: { projectPath?: string }) {
     if (projectPath) createNewSession(projectPath);
   };
 
-  const handleSelectGroup = (groupId: string) => {
-    setSelectedGroupId(groupId);
-    setStep("selectFocus");
-  };
+  const handleSelectGroup = async (groupId: string) => {
+    const group = groups.find((g) => g.id === groupId);
+    if (!group) return;
 
-  const handleCreateGroupSession = async (focusProjectId: string | null) => {
-    if (!selectedGroupId || !selectedGroup) return;
     setCreating(true);
     try {
+      // Pick first non-missing member's path as cwd
       let cwd: string | undefined;
-      if (focusProjectId) {
-        // Specific focus: use that project's path
-        const focusProject = projects.find((p) => p.id === focusProjectId);
-        if (!focusProject) return;
-        cwd = focusProject.path;
-      } else {
-        // Read-only: pick first non-missing member's path (backend will also pick one)
-        for (const m of selectedGroup.members) {
-          const project = projects.find((p) => p.id === m.projectId);
-          if (project) {
-            cwd = project.path;
-            break;
-          }
+      for (const m of group.members) {
+        const project = projects.find((p) => p.id === m.projectId);
+        if (project) {
+          cwd = project.path;
+          break;
         }
-        if (!cwd) return; // all members missing
       }
+      if (!cwd) return; // all members missing
 
       const { sessionId, commands, models, currentModel, modelScope, providerId } =
         await claudeCodeChatManager.createSession(cwd, {
           kind: "group",
-          groupId: selectedGroupId,
-          focusProjectId: focusProjectId ?? undefined,
+          groupId,
         });
 
       registerSessionInStore(
@@ -73,25 +60,19 @@ export function NewConversationMenu({ projectPath }: { projectPath?: string }) {
         true,
         {
           kind: "group",
-          groupId: selectedGroupId,
-          focusProjectId: focusProjectId ?? undefined,
+          groupId,
         },
       );
 
       setOpen(false);
       setStep("menu");
-      setSelectedGroupId(null);
     } finally {
       setCreating(false);
     }
   };
 
   const handleBack = () => {
-    if (step === "selectFocus") {
-      setStep("selectGroup");
-    } else {
-      setStep("menu");
-    }
+    setStep("menu");
   };
 
   return (
@@ -163,8 +144,9 @@ export function NewConversationMenu({ projectPath }: { projectPath?: string }) {
                 {groups.map((g) => (
                   <button
                     key={g.id}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent"
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent disabled:opacity-40"
                     onClick={() => handleSelectGroup(g.id)}
+                    disabled={creating}
                   >
                     <Layers size={14} strokeWidth={1.5} />
                     <span>{g.name}</span>
@@ -173,57 +155,6 @@ export function NewConversationMenu({ projectPath }: { projectPath?: string }) {
                     </span>
                   </button>
                 ))}
-              </>
-            )}
-
-            {step === "selectFocus" && selectedGroup && (
-              <>
-                <div className="flex items-center gap-1 px-2 py-1">
-                  <button
-                    className="rounded p-0.5 text-muted-foreground hover:text-foreground"
-                    onClick={handleBack}
-                  >
-                    <ChevronDown size={14} strokeWidth={1.5} className="rotate-90" />
-                  </button>
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {selectedGroup.name} — {t("project.selectFocus", "选择聚焦项目")}
-                  </span>
-                </div>
-                <div className="my-1 h-px bg-border" />
-                <button
-                  className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent disabled:opacity-40"
-                  onClick={() => handleCreateGroupSession(null)}
-                  disabled={
-                    creating ||
-                    !selectedGroup.members.some((m) => projects.find((p) => p.id === m.projectId))
-                  }
-                >
-                  <Lock size={14} strokeWidth={1.5} className="mt-0.5 shrink-0" />
-                  <span className="flex flex-col items-start text-left">
-                    <span>{t("project.focusReadOnly", "不指定（全只读模式）")}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {t("project.focusReadOnlyDescription", "不写任何成员，仅可读所有成员")}
-                    </span>
-                  </span>
-                </button>
-                <div className="my-1 h-px bg-border" />
-                {selectedGroup.members.map((m) => {
-                  const project = projects.find((p) => p.id === m.projectId);
-                  return (
-                    <button
-                      key={m.projectId}
-                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent disabled:opacity-40"
-                      onClick={() => handleCreateGroupSession(m.projectId)}
-                      disabled={creating || !project}
-                    >
-                      <SquarePen size={14} strokeWidth={1.5} />
-                      <span>{project?.name ?? m.projectId}</span>
-                      {m.role && (
-                        <span className="ml-auto text-xs text-muted-foreground">{m.role}</span>
-                      )}
-                    </button>
-                  );
-                })}
               </>
             )}
           </div>

@@ -53,14 +53,23 @@ export function PermissionDialog({ sessionId }: Props) {
     return null;
   }
 
-  const handleResolve = (result: PermissionResult) => {
+  const handleResolve = (
+    result: PermissionResult,
+    extra?: { elevation?: { projectId: string } },
+  ) => {
     chatLog(
-      "handleResolvePermission: sessionId=%s requestId=%s behavior=%s",
+      "handleResolvePermission: sessionId=%s requestId=%s behavior=%s elevation=%s",
       sessionId.slice(0, 8),
       requestId,
       result.behavior,
+      extra?.elevation?.projectId ?? "-",
     );
-    void respondToRequest(requestId, { type: "permission_request", result });
+    void respondToRequest(requestId, { type: "permission_request", result }, extra);
+
+    // Optimistic: track elevation grant in renderer store
+    if (extra?.elevation && result.behavior === "allow") {
+      useAgentStore.getState().addElevatedProject(sessionId, extra.elevation.projectId);
+    }
 
     // Sync setMode permission updates to agent store so the toolbar reflects the change
     if (result.behavior === "allow" && result.updatedPermissions) {

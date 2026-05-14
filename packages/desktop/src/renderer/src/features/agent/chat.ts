@@ -356,13 +356,15 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
   respondToRequest = async (
     requestId: string,
     respond: { type: "permission_request"; result: PermissionResult },
+    extra?: { elevation?: { projectId: string } },
   ) => {
     if (respond.type === "permission_request") {
       log(
-        "respondToRequest: sessionId=%s requestId=%s behavior=%s",
+        "respondToRequest: sessionId=%s requestId=%s behavior=%s elevation=%s",
         this.id,
         requestId,
         respond.result.behavior,
+        extra?.elevation?.projectId ?? "-",
       );
       const request = this.store
         .getState()
@@ -374,6 +376,7 @@ export class ClaudeCodeChat extends AbstractChat<ClaudeCodeUIMessage> {
         respond: {
           type: "permission_request",
           result: { ...respond.result, toolUseID: request?.request.options.toolUseID },
+          ...(extra?.elevation ? { elevation: extra.elevation } : {}),
         },
       });
 

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { isReasoningUIPart, isToolUIPart, type ToolUIPart } from "ai";
+import { isDataUIPart, isReasoningUIPart, isToolUIPart, type ToolUIPart } from "ai";
 import { CheckIcon, CopyIcon, ChevronDownIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorBoundary } from "react-error-boundary";
@@ -45,6 +45,16 @@ function stripInterruptedMarker(text: string): { text: string; interrupted: bool
   if (!text.endsWith(INTERRUPTED_BY_USER_MARKER)) return { text, interrupted: false };
   const before = text.slice(0, text.length - INTERRUPTED_BY_USER_MARKER.length).trimEnd();
   return { text: before, interrupted: true };
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function formatTokens(n: number): string {
+  if (n < 1000) return String(n);
+  return `${(n / 1000).toFixed(1)}k`;
 }
 
 type RenderToolPart = (
@@ -256,6 +266,23 @@ export const MessagePartRenderer = memo(
       };
     }, [message.parts]);
 
+    const usageInfo = useMemo(() => {
+      const resultPart = message.parts.findLast(
+        (p) => isDataUIPart(p) && p.type === "data-result/success",
+      );
+      if (resultPart == null || !isDataUIPart(resultPart)) return null;
+      const data = resultPart.data as {
+        duration_ms?: number;
+        modelUsage?: Record<string, { inputTokens?: number; outputTokens?: number }>;
+      };
+      const modelEntry = data.modelUsage ? Object.values(data.modelUsage)[0] : undefined;
+      return {
+        durationMs: data.duration_ms,
+        inputTokens: modelEntry?.inputTokens,
+        outputTokens: modelEntry?.outputTokens,
+      };
+    }, [message.parts]);
+
     // ── User role: render every part inside a single shared bubble ──────────
     //
     // A user turn is conceptually one message even when it carries multiple
@@ -418,6 +445,24 @@ export const MessagePartRenderer = memo(
               </MessageContent>
               {canShowAssistantActions && (
                 <MessageActions className="mt-2">
+                  {usageInfo && (
+                    <div
+                      className={cn(
+                        "flex items-center gap-2 text-xs text-muted-foreground/50",
+                        "select-none",
+                      )}
+                    >
+                      {usageInfo.durationMs != null && (
+                        <span>⏱ {formatDuration(usageInfo.durationMs)}</span>
+                      )}
+                      {usageInfo.inputTokens != null && (
+                        <span>📥 {formatTokens(usageInfo.inputTokens)}</span>
+                      )}
+                      {usageInfo.outputTokens != null && (
+                        <span>📤 {formatTokens(usageInfo.outputTokens)}</span>
+                      )}
+                    </div>
+                  )}
                   <CopyMarkdownButton text={displayText} />
                 </MessageActions>
               )}

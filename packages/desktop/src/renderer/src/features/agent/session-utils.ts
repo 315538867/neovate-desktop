@@ -51,7 +51,6 @@ export function registerSessionInStore(
   groupMeta?: {
     kind?: "group";
     groupId?: string;
-    focusProjectId?: string;
   },
 ) {
   log(
@@ -69,7 +68,6 @@ export function registerSessionInStore(
     isNew: true,
     kind: groupMeta?.kind,
     groupId: groupMeta?.groupId,
-    focusProjectId: groupMeta?.focusProjectId,
   };
   if (activate) {
     store.createSession(sessionId, meta);
