@@ -15,14 +15,11 @@ export type ProjectInfo = Project & {
 
 // ── Project Groups ──────────────────────────────────────────────
 
-/** 组成员的角色：受约束的短标签，仅作为 AI 的语义提示 */
-export type ProjectRole = "library" | "consumer" | "shared" | "service" | "tool" | "other";
-
 export type ProjectGroupMember = {
   /** 引用 Project.id */
   projectId: string;
-  /** 角色 */
-  role: ProjectRole;
+  /** 角色（自由文本，可选，仅作为 AI 的语义提示） */
+  role?: string;
 };
 
 export type ProjectGroup = {
@@ -54,4 +51,6 @@ export type ProjectStore = {
   lastCrashTs: number;
   /** 项目分组 */
   groups: ProjectGroup[];
+  /** 一次性迁移标记：将旧的枚举 role 重置为 undefined，置 "v1" 后不再重置 */
+  groupsRoleMigrationVersion?: string;
 };

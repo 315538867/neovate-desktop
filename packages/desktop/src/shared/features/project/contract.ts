@@ -3,6 +3,19 @@ import { z } from "zod";
 
 import type { Project, ProjectGroup, ProjectInfo } from "./types";
 
+/** 角色：自由文本，可选；空白被规整为 undefined */
+const roleSchema = z
+  .string()
+  .trim()
+  .max(60)
+  .optional()
+  .transform((v) => (v ? v : undefined));
+
+const memberSchema = z.object({
+  projectId: z.string(),
+  role: roleSchema,
+});
+
 export const projectContract = {
   list: oc.output(type<ProjectInfo[]>()),
 
@@ -48,12 +61,7 @@ export const projectContract = {
       .input(
         z.object({
           name: z.string().min(1),
-          members: z.array(
-            z.object({
-              projectId: z.string(),
-              role: z.enum(["library", "consumer", "shared", "service", "tool", "other"]),
-            }),
-          ),
+          members: z.array(memberSchema),
         }),
       )
       .output(type<ProjectGroup>()),
@@ -63,14 +71,7 @@ export const projectContract = {
         z.object({
           id: z.string(),
           name: z.string().min(1).optional(),
-          members: z
-            .array(
-              z.object({
-                projectId: z.string(),
-                role: z.enum(["library", "consumer", "shared", "service", "tool", "other"]),
-              }),
-            )
-            .optional(),
+          members: z.array(memberSchema).optional(),
         }),
       )
       .output(type<ProjectGroup>()),
@@ -88,10 +89,7 @@ export const projectContract = {
       .input(
         z.object({
           groupId: z.string(),
-          member: z.object({
-            projectId: z.string(),
-            role: z.enum(["library", "consumer", "shared", "service", "tool", "other"]),
-          }),
+          member: memberSchema,
         }),
       )
       .output(type<void>()),
@@ -101,7 +99,7 @@ export const projectContract = {
         z.object({
           groupId: z.string(),
           projectId: z.string(),
-          role: z.enum(["library", "consumer", "shared", "service", "tool", "other"]),
+          role: roleSchema,
         }),
       )
       .output(type<void>()),

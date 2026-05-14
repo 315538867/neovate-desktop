@@ -12,7 +12,6 @@ export const programmaticEventSchemas = {
   "group.bash.oof": z.object({
     sessionId: z.string(),
     groupId: z.string(),
-    focusProjectId: z.string().optional(),
     command: z.string(),
     pattern: z.string(),
   }),

@@ -112,8 +112,8 @@ export type SessionInfo = {
   kind?: ConversationKind;
   /** 分组 id（kind === "group" 时） */
   groupId?: string;
-  /** 当前聚焦项目 id（kind === "group" 时） */
-  focusProjectId?: string;
+  /** 组对话：已临时提升写权限的项目 id 列表（本会话有效） */
+  elevatedProjectIds?: string[];
 };
 
 /** Event emitted when a session is created or deleted */
@@ -131,5 +131,6 @@ export type ActiveSessionInfo = {
   providerId?: string;
   kind?: ConversationKind;
   groupId?: string;
-  focusProjectId?: string;
+  /** 组对话：已临时提升写权限的项目 id 列表（本会话有效，不持久化） */
+  elevatedProjectIds?: string[];
 };

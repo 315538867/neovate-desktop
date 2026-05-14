@@ -91,7 +91,7 @@ describe("contract shape (Wave 3.1)", () => {
     const top = Object.keys(sessionContract).length;
     const claudeCodeLeaves = Object.keys(sessionContract.claudeCode).length;
     const networkLeaves = Object.keys(sessionContract.network).length;
-    // 12 top-level + 1 (setFocusProject) + 6 + 5 - 2 group keys = 22 + 1 + 6 + 5 - 2 = 24
-    expect(top + claudeCodeLeaves + networkLeaves - /* group keys counted twice */ 2).toBe(24);
+    // 14 top-level + 6 (claudeCode) + 5 (network) - 2 (group keys counted twice) = 23
+    expect(top + claudeCodeLeaves + networkLeaves - /* group keys counted twice */ 2).toBe(23);
   });
 });

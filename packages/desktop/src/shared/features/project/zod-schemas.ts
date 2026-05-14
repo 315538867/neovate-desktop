@@ -1,18 +1,16 @@
 import { z } from "zod";
 
-/** 组成员的角色 */
-export const projectRoleSchema = z.enum([
-  "library",
-  "consumer",
-  "shared",
-  "service",
-  "tool",
-  "other",
-]);
+/** 角色：自由文本，可选；空白被规整为 undefined */
+const roleSchema = z
+  .string()
+  .trim()
+  .max(60)
+  .optional()
+  .transform((v) => (v ? v : undefined));
 
 export const projectGroupMemberSchema = z.object({
   projectId: z.string(),
-  role: projectRoleSchema,
+  role: roleSchema,
 });
 
 export const projectGroupSchema = z.object({
