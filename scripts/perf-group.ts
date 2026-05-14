@@ -10,7 +10,6 @@
  * Usage: bun run scripts/perf-group.ts
  */
 
-import { randomUUID } from "node:crypto";
 import { relative } from "node:path";
 
 // ============================================================
@@ -78,34 +77,63 @@ function benchExpandMembers() {
 function renderGroupContext(
   group: { name: string },
   members: GroupMemberSnapshot[],
-  focus: GroupMemberSnapshot,
+  focus: GroupMemberSnapshot | null,
 ): string {
+  if (focus === null) {
+    // Read-only mode: list all non-missing members, no focus section
+    const lines: string[] = [
+      "## 项目分组上下文",
+      "",
+      `当前会话属于 **组对话（全只读模式）**，所属分组 **${group.name}**。`,
+      "",
+      "### 组成员（仅可读）",
+    ];
+    const visible = members.filter((m) => !m.missing);
+    if (visible.length === 0) {
+      lines.push("- (无可用成员)");
+    } else {
+      for (const m of visible) {
+        lines.push(`- **${m.name}** (${m.role})`);
+        lines.push(`  路径：${m.path}`);
+      }
+    }
+    lines.push("", "### 协作规则");
+    lines.push("- 当前为 **全只读模式**：禁止 Edit/Write/MultiEdit/NotebookEdit。");
+    lines.push("- 所有成员对 Read/Grep/Glob/LSP 完全开放。");
+    lines.push("- 如需修改任何成员，请先告知用户切换到该项目（UI 顶部 chip 切换）。");
+    lines.push("- Bash 中的写操作请遵守同样的边界。");
+    return lines.join("\n");
+  }
+
   const otherMembers = members.filter((m) => m.projectId !== focus.projectId);
   const lines: string[] = [
     "## 项目分组上下文",
     "",
-    `当前会话属于 **组对话**，所属分组 **${group.name}**。`,
+    `当前会话属于 **组对话**,所属分组 **${group.name}**。`,
     "",
-    "### 当前聚焦项目（可读可写）",
+    "### 当前聚焦项目(可读可写)",
     `- **${focus.name}** (${focus.role})`,
-    `  路径：${focus.path}`,
+    `  路径:${focus.path}`,
     "",
-    "### 同组其他成员（仅可读，禁止 Edit/Write/MultiEdit/NotebookEdit）",
+    "### 同组其他成员(仅可读,禁止 Edit/Write/MultiEdit/NotebookEdit)",
   ];
 
   for (const m of otherMembers) {
     lines.push(`- **${m.name}** (${m.role})`);
-    lines.push(`  路径：${m.path ?? "(缺失)"}`);
+    lines.push(`  路径:${m.path ?? "(缺失)"}`);
   }
 
   lines.push("", "### 协作规则");
-  lines.push("- 写操作（Edit/Write/MultiEdit/NotebookEdit）默认仅作用于聚焦项目。");
-  lines.push("- 其他成员对 Read/Grep/Glob/LSP 完全开放，请主动探索它们的代码以理解关系。");
-  lines.push("- 如需修改其他成员，请先告知用户切换聚焦项目（用户在 UI 顶部 chip 切换）。");
+  lines.push("- 写操作(Edit/Write/MultiEdit/NotebookEdit)默认仅作用于聚焦项目。");
+  lines.push("- 其他成员对 Read/Grep/Glob/LSP 完全开放,请主动探索它们的代码以理解关系。");
+  lines.push("- 如需修改其他成员,请先告知用户切换聚焦项目(用户在 UI 顶部 chip 切换)。");
   lines.push("- Bash 中的写操作请遵守同样的边界。");
 
   return lines.join("\n");
 }
+
+// Note: mock punctuation may differ slightly from src/main/.../render-group-context.ts
+// (this script measures structural size to verify the ≤6KB budget, not byte parity).
 
 function benchRenderGroupContext() {
   const group = { name: "Test Group" };
@@ -121,9 +149,16 @@ function benchRenderGroupContext() {
   const output = renderGroupContext(group, members, focus);
   const sizeKB = Buffer.byteLength(output, "utf-8") / 1024;
 
-  console.log("renderGroupContext (20 members):");
+  console.log("renderGroupContext (20 members, focused):");
   console.log("  Size: %s KB (limit ≤ 6KB)", sizeKB.toFixed(2));
   console.log("  %s", sizeKB <= 6 ? "✅ PASS" : "❌ FAIL");
+
+  // Read-only variant
+  const outputRO = renderGroupContext(group, members, null);
+  const sizeROKB = Buffer.byteLength(outputRO, "utf-8") / 1024;
+  console.log("renderGroupContext (20 members, read-only):");
+  console.log("  Size: %s KB (limit ≤ 6KB)", sizeROKB.toFixed(2));
+  console.log("  %s", sizeROKB <= 6 ? "✅ PASS" : "❌ FAIL");
   console.log();
 }
 
