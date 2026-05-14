@@ -336,7 +336,6 @@ describe("SessionManager — group session", () => {
       cwd: "/code/edu-portal",
       kind: "group",
       groupId: "g-edu",
-      focusProjectId: "p-portal",
       groupMembers: [
         {
           projectId: "p-portal",
@@ -361,48 +360,6 @@ describe("SessionManager — group session", () => {
       ...overrides,
     });
   }
-
-  describe("setFocusProject", () => {
-    it("switches focus and sets pending hint", () => {
-      setSession();
-      manager.setFocusProject("s1", "p-design");
-
-      const session = (manager as any).sessions.get("s1");
-      expect(session.focusProjectId).toBe("p-design");
-      expect(session.pendingHint).toContain("edu-design");
-      expect(session.pendingHint).toContain("焦点已切换");
-    });
-
-    it("throws for non-group session", () => {
-      setSession({ kind: "single" });
-      expect(() => manager.setFocusProject("s1", "p-design")).toThrow("not a group session");
-    });
-
-    it("throws for unknown session", () => {
-      expect(() => manager.setFocusProject("nonexistent", "p-design")).toThrow("Unknown session");
-    });
-
-    it("throws for non-member project", () => {
-      setSession();
-      expect(() => manager.setFocusProject("s1", "p-unknown")).toThrow("not a member");
-    });
-
-    it("throws for missing member", () => {
-      setSession({
-        groupMembers: [
-          {
-            projectId: "p-portal",
-            role: "consumer",
-            path: "/code/edu-portal",
-            name: "edu-portal",
-            missing: false,
-          },
-          { projectId: "p-design", role: "library", path: null, name: "edu-design", missing: true },
-        ],
-      });
-      expect(() => manager.setFocusProject("s1", "p-design")).toThrow("cannot switch focus");
-    });
-  });
 
   describe("onGroupChanged", () => {
     it("refreshes group members snapshot", () => {
@@ -440,7 +397,7 @@ describe("SessionManager — group session", () => {
       expect(session.pendingHint).toContain("分组成员已更新");
     });
 
-    it("clears focus when current focus is removed from group", () => {
+    it("refreshes members when group membership changes", () => {
       setSession();
       const expanded = [
         {
@@ -457,10 +414,11 @@ describe("SessionManager — group session", () => {
       manager.onGroupChanged("g-edu");
 
       const session = (manager as any).sessions.get("s1");
-      expect(session.focusProjectId).toBeUndefined();
+      expect(session.groupMembers).toBe(expanded);
+      expect(session.pendingHint).toContain("分组成员已更新");
     });
 
-    it("clears focus when current focus goes missing", () => {
+    it("refreshes members when members go missing", () => {
       setSession();
       const expanded = [
         {
@@ -484,16 +442,18 @@ describe("SessionManager — group session", () => {
       manager.onGroupChanged("g-edu");
 
       const session = (manager as any).sessions.get("s1");
-      expect(session.focusProjectId).toBeUndefined();
+      expect(session.groupMembers).toBe(expanded);
+      expect(session.pendingHint).toContain("分组成员已更新");
     });
 
     it("does nothing for non-existent group", () => {
       setSession();
       groupServiceMock.getGroup.mockReturnValue(undefined);
 
+      const membersBefore = (manager as any).sessions.get("s1").groupMembers;
       expect(() => manager.onGroupChanged("g-nonexistent")).not.toThrow();
       const session = (manager as any).sessions.get("s1");
-      expect(session.focusProjectId).toBe("p-portal"); // unchanged
+      expect(session.groupMembers).toBe(membersBefore); // unchanged
     });
 
     it("only affects sessions for the target group", () => {
@@ -502,7 +462,6 @@ describe("SessionManager — group session", () => {
       (manager as any).sessions.set("s2", {
         kind: "group",
         groupId: "g-other",
-        focusProjectId: "p-other",
         groupMembers: [
           {
             projectId: "p-other",
@@ -522,7 +481,6 @@ describe("SessionManager — group session", () => {
 
       const s2 = (manager as any).sessions.get("s2");
       expect(s2.groupMembers).toHaveLength(1); // unchanged
-      expect(s2.focusProjectId).toBe("p-other"); // unchanged
     });
   });
 });

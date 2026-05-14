@@ -65,7 +65,7 @@ describe("GroupService", () => {
     });
   }
 
-  function addGroup(id: string, name: string, members: { projectId: string; role: string }[]) {
+  function addGroup(id: string, name: string, members: { projectId: string; role?: string }[]) {
     projectStore.addGroup({
       id,
       name,

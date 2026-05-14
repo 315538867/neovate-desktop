@@ -15,31 +15,25 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
-const { mockSetFocusProject, mockClientSetFocusProject } = vi.hoisted(() => ({
-  mockSetFocusProject: vi.fn(),
-  mockClientSetFocusProject: vi.fn(),
+const { mockAddElevatedProject } = vi.hoisted(() => ({
+  mockAddElevatedProject: vi.fn(),
 }));
 
 vi.mock("../../store", () => ({
   useAgentStore: (selector: any) => {
     if (typeof selector === "function") {
-      return selector({ setFocusProject: mockSetFocusProject });
+      return selector({
+        addElevatedProject: mockAddElevatedProject,
+        revokeElevation: vi.fn(),
+      });
     }
-    return { setFocusProject: mockSetFocusProject };
+    return {
+      addElevatedProject: mockAddElevatedProject,
+      revokeElevation: vi.fn(),
+    };
   },
 }));
 
-vi.mock("../../../../orpc", () => ({
-  client: {
-    agent: {
-      session: {
-        setFocusProject: mockClientSetFocusProject,
-      },
-    },
-  },
-}));
-
-// Mock AlertDialog to render children inline (base-ui portal has issues in jsdom)
 vi.mock("../../../../components/ui/alert-dialog", () => ({
   AlertDialog: ({ children, open }: any) => (open ? <>{children}</> : null),
   AlertDialogClose: ({ children }: any) => <>{children}</>,
@@ -50,6 +44,20 @@ vi.mock("../../../../components/ui/alert-dialog", () => ({
   AlertDialogHeader: ({ children }: any) => <div>{children}</div>,
   AlertDialogPopup: ({ children }: any) => <div role="alertdialog">{children}</div>,
   AlertDialogTitle: ({ children }: any) => <div>{children}</div>,
+}));
+
+vi.mock("../../../../components/ui/popover", () => ({
+  Popover: ({ children }: any) => <>{children}</>,
+  PopoverTrigger: ({ children, className, title }: any) => (
+    <button className={className} title={title} type="button">
+      {children}
+    </button>
+  ),
+  PopoverPopup: ({ children }: any) => <div role="menu">{children}</div>,
+}));
+
+vi.mock("../../../../lib/utils", () => ({
+  cn: (...args: any[]) => args.filter(Boolean).join(" "),
 }));
 
 vi.mock("../../../project/store", () => ({
@@ -95,7 +103,6 @@ function makeSession(overrides?: Partial<ChatSession>): ChatSession {
     sessionId: "s1",
     kind: "group",
     groupId: "g-edu",
-    focusProjectId: "p-portal",
     title: "Test Group Session",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -112,87 +119,47 @@ describe("GroupFocusBar", () => {
     expect(screen.getByText("Edu")).toBeDefined();
   });
 
-  it("renders focus project chip", () => {
+  it("renders read-only chip", () => {
     render(<GroupFocusBar session={makeSession()} />);
-    expect(screen.getByText("edu-portal")).toBeDefined();
+    const chips = screen.getAllByText("group.readOnlyChip");
+    expect(chips.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("renders other member as clickable button", () => {
+  it("renders all members as clickable buttons", () => {
     render(<GroupFocusBar session={makeSession()} />);
-    const chip = screen.getByText("edu-design");
-    // Non-focus members are rendered as <button> elements
-    expect(chip.tagName).toBe("BUTTON");
-    expect(chip.getAttribute("type")).toBe("button");
+    const portalButtons = screen.getAllByText("edu-portal");
+    const chipBtn = portalButtons.find(
+      (b) => b.tagName === "BUTTON" && !b.closest('[role="menu"]'),
+    );
+    expect(chipBtn).toBeDefined();
+    expect(screen.getByText("edu-design").tagName).toBeTruthy();
   });
 
-  it("opens confirmation dialog when clicking other member", async () => {
+  it("shows read-only hint at bottom", () => {
     render(<GroupFocusBar session={makeSession()} />);
-    fireEvent.click(screen.getByText("edu-design"));
+    expect(screen.getByText("group.readOnlyHint")).toBeDefined();
+  });
 
+  it("calls addElevatedProject when clicking a member chip", () => {
+    render(<GroupFocusBar session={makeSession()} />);
+    const buttons = screen.getAllByText("edu-design");
+    const chipBtn = buttons.find((b) => b.tagName === "BUTTON" && !b.closest('[role="menu"]'));
+    expect(chipBtn).toBeDefined();
+    fireEvent.click(chipBtn!);
+    expect(mockAddElevatedProject).toHaveBeenCalledWith("s1", "p-design");
+  });
+
+  it("renders elevated member with unlock icon and opens revoke dialog on click", async () => {
+    render(<GroupFocusBar session={makeSession({ elevatedProjectIds: ["p-design"] })} />);
+    // Click elevated chip
+    const buttons = screen.getAllByText("edu-design");
+    const elevatedBtn = buttons.find((b) => b.tagName === "BUTTON" && !b.closest('[role="menu"]'));
+    expect(elevatedBtn).toBeDefined();
+    fireEvent.click(elevatedBtn!);
     await waitFor(() => {
-      const dialog = screen.getByRole("alertdialog");
-      expect(dialog).toBeDefined();
+      expect(screen.getByRole("alertdialog")).toBeDefined();
     });
-  });
-
-  it("renders dialog with confirm and cancel buttons", async () => {
-    render(<GroupFocusBar session={makeSession()} />);
-    fireEvent.click(screen.getByText("edu-design"));
-
-    await waitFor(() => {
-      const dialog = screen.getByRole("alertdialog");
-      expect(dialog).toBeDefined();
-      // The dialog should have at least 2 buttons (cancel + confirm)
-      const buttons = dialog.querySelectorAll("button");
-      expect(buttons.length).toBeGreaterThanOrEqual(2);
-    });
-  });
-
-  it("calls setFocusProject on confirm", async () => {
-    mockClientSetFocusProject.mockResolvedValue(undefined);
-
-    render(<GroupFocusBar session={makeSession()} />);
-    fireEvent.click(screen.getByText("edu-design"));
-
-    // Wait for the dialog buttons to appear
-    const dialog = await screen.findByRole("alertdialog");
-    const buttons = dialog.querySelectorAll("button");
-    expect(buttons.length).toBeGreaterThanOrEqual(2);
-
-    // Click the confirm button (last one)
-    fireEvent.click(buttons[buttons.length - 1]);
-
-    // setFocusProject should be called synchronously on click
-    expect(mockSetFocusProject).toHaveBeenCalledWith("s1", "p-design");
-
-    await waitFor(() => {
-      expect(mockClientSetFocusProject).toHaveBeenCalledWith({
-        sessionId: "s1",
-        projectId: "p-design",
-      });
-    });
-  });
-
-  it("reverts focus on setFocusProject failure", async () => {
-    mockClientSetFocusProject.mockRejectedValue(new Error("Network error"));
-
-    render(<GroupFocusBar session={makeSession()} />);
-    fireEvent.click(screen.getByText("edu-design"));
-
-    const dialog = await screen.findByRole("alertdialog");
-    const buttons = dialog.querySelectorAll("button");
-    expect(buttons.length).toBeGreaterThanOrEqual(2);
-
-    // Click the confirm button
-    fireEvent.click(buttons[buttons.length - 1]);
-
-    // Optimistic update should happen synchronously
-    expect(mockSetFocusProject).toHaveBeenCalledWith("s1", "p-design");
-
-    // Wait for the revert (async catch block)
-    await waitFor(() => {
-      expect(mockSetFocusProject).toHaveBeenCalledWith("s1", "p-portal");
-    });
+    expect(screen.getByText("group.revokeElevationTitle")).toBeDefined();
   });
 
   it("does not render for single session", () => {

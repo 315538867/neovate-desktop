@@ -36,7 +36,6 @@ function makeSingleSession(cwd: string): SessionEntry {
 }
 
 function makeGroupSession(
-  focusProjectId: string,
   members: {
     projectId: string;
     path: string | null;
@@ -52,14 +51,13 @@ function makeGroupSession(
       interrupt: () => {},
       setPermissionMode: () => {},
     } as any,
-    cwd: members.find((m) => m.projectId === focusProjectId)?.path ?? "/tmp/fallback",
+    cwd: members.find((m) => m.path)?.path ?? "/tmp/fallback",
     consumeExited: false,
     uiToSdkMessageIds: new Map(),
     pendingRequests: new Map(),
     createdAt: Date.now(),
     kind: "group",
     groupId: "g1",
-    focusProjectId,
     groupMembers: members.map((m) => ({
       projectId: m.projectId,
       role: m.role as any,
@@ -144,7 +142,7 @@ describe("checkToolPath", () => {
       dirB = tmpDir();
       mkdirSync(dirA, { recursive: true });
       mkdirSync(dirB, { recursive: true });
-      session = makeGroupSession("p-a", [
+      session = makeGroupSession([
         { projectId: "p-a", path: dirA, name: "ProjectA", role: "consumer", missing: false },
         { projectId: "p-b", path: dirB, name: "ProjectB", role: "library", missing: false },
       ]);
@@ -155,47 +153,50 @@ describe("checkToolPath", () => {
       rmSync(dirB, { recursive: true, force: true });
     });
 
-    it("allows Edit on focus project", () => {
+    it("denies Edit on any member without elevation", () => {
       const file = touch(dirA, "src/index.ts");
       const result = checkToolPath("Edit", { file_path: file }, session);
-      expect(result.allow).toBe(true);
+      expect(result.allow).toBe(false);
+      if (!result.allow) {
+        expect(result.reason).toContain("全只读模式");
+        expect(result.elevation).toEqual({ projectId: "p-a", projectName: "ProjectA" });
+      }
     });
 
-    it("denies Write on non-focus member", () => {
+    it("denies Write on member with elevation metadata", () => {
       const file = touch(dirB, "lib/util.ts");
       const result = checkToolPath("Write", { file_path: file }, session);
       expect(result.allow).toBe(false);
       if (!result.allow) {
         expect(result.reason).toContain("ProjectB");
-        expect(result.reason).toContain("ProjectA");
-        expect(result.reason).toContain("可写");
+        expect(result.elevation).toEqual({ projectId: "p-b", projectName: "ProjectB" });
       }
     });
 
-    it("allows Read on non-focus member", () => {
+    it("allows Read on any member", () => {
       const file = touch(dirB, "lib/util.ts");
       const result = checkToolPath("Read", { file_path: file }, session);
       expect(result.allow).toBe(true);
     });
 
-    it("allows Grep on non-focus member", () => {
+    it("allows Grep on any member", () => {
       // dirB itself exists
       const result = checkToolPath("Grep", { path: dirB }, session);
       expect(result.allow).toBe(true);
     });
 
-    it("allows Glob on non-focus member", () => {
+    it("allows Glob on any member", () => {
       const result = checkToolPath("Glob", { path: dirB }, session);
       expect(result.allow).toBe(true);
     });
 
-    it("denies MultiEdit on non-focus member", () => {
+    it("denies MultiEdit on member without elevation", () => {
       const file = touch(dirB, "lib/util.ts");
       const result = checkToolPath("MultiEdit", { file_path: file }, session);
       expect(result.allow).toBe(false);
     });
 
-    it("denies NotebookEdit on non-focus member", () => {
+    it("denies NotebookEdit on member without elevation", () => {
       const file = touch(dirB, "notebooks/analysis.ipynb");
       const result = checkToolPath("NotebookEdit", { notebook_path: file }, session);
       expect(result.allow).toBe(false);
@@ -216,13 +217,49 @@ describe("checkToolPath", () => {
         expect(result.reason).toContain("不在分组任何成员内");
       }
     });
+
+    // ── Elevation ──
+
+    it("allows Write on elevated member", () => {
+      session.elevatedProjectIds = new Set(["p-b"]);
+      const file = touch(dirB, "lib/util.ts");
+      const result = checkToolPath("Write", { file_path: file }, session);
+      expect(result.allow).toBe(true);
+    });
+
+    it("still denies Write on non-elevated member", () => {
+      const dirC = tmpDir();
+      mkdirSync(dirC, { recursive: true });
+      session.groupMembers!.push({
+        projectId: "p-c",
+        path: dirC,
+        name: "ProjectC",
+        role: "library",
+        missing: false,
+      });
+      session.elevatedProjectIds = new Set(["p-b"]);
+      const file = touch(dirC, "src/app.ts");
+      const result = checkToolPath("Edit", { file_path: file }, session);
+      expect(result.allow).toBe(false);
+      if (!result.allow) {
+        expect(result.elevation).toEqual({ projectId: "p-c", projectName: "ProjectC" });
+      }
+      rmSync(dirC, { recursive: true, force: true });
+    });
+
+    it("allows Read on elevated member (elevation does not affect reads)", () => {
+      session.elevatedProjectIds = new Set(["p-b"]);
+      const file = touch(dirB, "lib/util.ts");
+      // Read was already allowed for any member; elevation doesn't change that
+      expect(checkToolPath("Read", { file_path: file }, session).allow).toBe(true);
+    });
   });
 
-  describe("missing focus member", () => {
-    it("denies all writes when focus is missing", () => {
+  describe("missing members", () => {
+    it("denies writes with elevation metadata when some members missing", () => {
       const dirA = tmpDir();
       mkdirSync(dirA, { recursive: true });
-      const session = makeGroupSession("p-a", [
+      const session = makeGroupSession([
         { projectId: "p-a", path: null, name: "ProjectA", role: "consumer", missing: true },
         { projectId: "p-b", path: dirA, name: "ProjectB", role: "library", missing: false },
       ]);
@@ -231,28 +268,128 @@ describe("checkToolPath", () => {
       const result = checkToolPath("Write", { file_path: file }, session);
       expect(result.allow).toBe(false);
       if (!result.allow) {
-        expect(result.reason).toContain("聚焦项目已不存在");
+        expect(result.reason).toContain("全只读模式");
+        expect(result.elevation).toEqual({ projectId: "p-b", projectName: "ProjectB" });
       }
 
       rmSync(dirA, { recursive: true, force: true });
     });
 
-    it("denies all reads when focus is missing", () => {
+    it("allows reads on existing member even when some members missing", () => {
       const dirB = tmpDir();
       mkdirSync(dirB, { recursive: true });
-      const session = makeGroupSession("p-a", [
+      const session = makeGroupSession([
         { projectId: "p-a", path: null, name: "ProjectA", role: "consumer", missing: true },
         { projectId: "p-b", path: dirB, name: "ProjectB", role: "library", missing: false },
       ]);
 
       const file = touch(dirB, "readme.md");
       const result = checkToolPath("Read", { file_path: file }, session);
-      expect(result.allow).toBe(false);
-      if (!result.allow) {
-        expect(result.reason).toContain("聚焦项目已不存在");
-      }
+      expect(result.allow).toBe(true);
 
       rmSync(dirB, { recursive: true, force: true });
+    });
+  });
+
+  describe("read-only mode (group, no elevation)", () => {
+    let dirA: string;
+    let dirB: string;
+    let session: SessionEntry;
+
+    beforeEach(() => {
+      dirA = tmpDir();
+      dirB = tmpDir();
+      mkdirSync(dirA, { recursive: true });
+      mkdirSync(dirB, { recursive: true });
+      session = makeGroupSession([
+        { projectId: "p-a", path: dirA, name: "ProjectA", role: "consumer", missing: false },
+        { projectId: "p-b", path: dirB, name: "ProjectB", role: "library", missing: false },
+      ]);
+    });
+
+    afterEach(() => {
+      rmSync(dirA, { recursive: true, force: true });
+      rmSync(dirB, { recursive: true, force: true });
+    });
+
+    it("denies Edit on any member with 全只读模式 reason and elevation", () => {
+      const file = touch(dirA, "src/index.ts");
+      const result = checkToolPath("Edit", { file_path: file }, session);
+      expect(result.allow).toBe(false);
+      if (!result.allow) {
+        expect(result.reason).toContain("全只读模式");
+        expect(result.elevation).toEqual({ projectId: "p-a", projectName: "ProjectA" });
+      }
+    });
+
+    it("denies Write on any member with 全只读模式 reason and elevation", () => {
+      const file = touch(dirB, "lib/util.ts");
+      const result = checkToolPath("Write", { file_path: file }, session);
+      expect(result.allow).toBe(false);
+      if (!result.allow) {
+        expect(result.reason).toContain("全只读模式");
+        expect(result.elevation).toEqual({ projectId: "p-b", projectName: "ProjectB" });
+      }
+    });
+
+    it("denies MultiEdit on any member with 全只读模式 reason", () => {
+      const file = touch(dirA, "src/foo.ts");
+      const result = checkToolPath("MultiEdit", { file_path: file }, session);
+      expect(result.allow).toBe(false);
+      if (!result.allow) {
+        expect(result.reason).toContain("全只读模式");
+        expect(result.elevation).toBeDefined();
+      }
+    });
+
+    it("denies NotebookEdit on any member with 全只读模式 reason", () => {
+      const file = touch(dirA, "notebooks/analysis.ipynb");
+      const result = checkToolPath("NotebookEdit", { notebook_path: file }, session);
+      expect(result.allow).toBe(false);
+      if (!result.allow) {
+        expect(result.reason).toContain("全只读模式");
+        expect(result.elevation).toBeDefined();
+      }
+    });
+
+    it("allows Read on any non-missing member", () => {
+      const fileA = touch(dirA, "readme.md");
+      const fileB = touch(dirB, "lib/util.ts");
+      expect(checkToolPath("Read", { file_path: fileA }, session).allow).toBe(true);
+      expect(checkToolPath("Read", { file_path: fileB }, session).allow).toBe(true);
+    });
+
+    it("allows Grep/Glob on any non-missing member", () => {
+      expect(checkToolPath("Grep", { path: dirA }, session).allow).toBe(true);
+      expect(checkToolPath("Glob", { path: dirB }, session).allow).toBe(true);
+    });
+
+    it("denies Read on path outside any member", () => {
+      const result = checkToolPath("Read", { file_path: "/etc/hosts" }, session);
+      expect(result.allow).toBe(false);
+      if (!result.allow) {
+        expect(result.reason).toContain("不在分组任何成员内");
+      }
+    });
+
+    it("allows Bash (no path field) even in read-only mode", () => {
+      const result = checkToolPath("Bash", { command: "ls" }, session);
+      expect(result.allow).toBe(true);
+    });
+
+    it("allows Write on elevated member in read-only mode", () => {
+      session.elevatedProjectIds = new Set(["p-b"]);
+      const file = touch(dirB, "lib/util.ts");
+      const result = checkToolPath("Write", { file_path: file }, session);
+      expect(result.allow).toBe(true);
+    });
+
+    it("denies Write outside any member with no elevation in read-only mode", () => {
+      const result = checkToolPath("Edit", { file_path: "/etc/hosts" }, session);
+      expect(result.allow).toBe(false);
+      if (!result.allow) {
+        expect(result.elevation).toBeUndefined();
+      }
     });
   });
 

@@ -1,11 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const { sharedStores } = vi.hoisted(() => ({
+  // shared state across `new Store(...)` calls of the same name, so
+  // tests can set up pre-existing data (e.g. legacy enum roles) before
+  // instantiating ProjectStore to exercise its migration logic.
+  sharedStores: new Map<string, Record<string, unknown>>(),
+}));
+
 vi.mock("electron-store", () => ({
   default: vi.fn(function (this: any, opts: any) {
     const defaults = (opts as any)?.defaults ?? {};
-    let data: Record<string, unknown> = { ...defaults };
-    this.get = function (key: string) {
-      return data[key];
+    const key = `${opts?.cwd ?? ""}::${opts?.name ?? "default"}`;
+    if (!sharedStores.has(key)) {
+      sharedStores.set(key, { ...defaults });
+    } else {
+      // merge defaults for any new keys
+      const existing = sharedStores.get(key)!;
+      for (const k of Object.keys(defaults)) {
+        if (!(k in existing)) existing[k] = defaults[k];
+      }
+    }
+    const data = sharedStores.get(key)!;
+    this.get = function (k: string) {
+      return data[k];
     };
     this.set = function (keyOrObj: string | Record<string, unknown>, value?: unknown) {
       if (typeof keyOrObj === "string") {
@@ -14,8 +31,8 @@ vi.mock("electron-store", () => ({
         Object.assign(data, keyOrObj);
       }
     };
-    this.delete = function (key: string) {
-      delete data[key];
+    this.delete = function (k: string) {
+      delete data[k];
     };
     Object.defineProperty(this, "store", {
       get() {
@@ -23,7 +40,7 @@ vi.mock("electron-store", () => ({
       },
     });
     this.clear = function () {
-      data = {};
+      for (const k of Object.keys(data)) delete data[k];
     };
   }),
 }));
@@ -35,6 +52,7 @@ describe("ProjectStore groups", () => {
   let store: ProjectStore;
 
   beforeEach(() => {
+    sharedStores.clear();
     store = new ProjectStore();
     store.ensurePlayground();
   });
@@ -45,8 +63,8 @@ describe("ProjectStore groups", () => {
         id: "g1",
         name: "Edu",
         members: [
-          { projectId: "p1", role: "consumer" as const },
-          { projectId: "p2", role: "library" as const },
+          { projectId: "p1", role: "前端" },
+          { projectId: "p2", role: "组件库" },
         ],
         createdAt: new Date().toISOString(),
         lastUpdatedAt: new Date().toISOString(),
@@ -66,15 +84,15 @@ describe("ProjectStore groups", () => {
       store.addGroup({
         id: "g1",
         name: "Old",
-        members: [{ projectId: "p1", role: "consumer" as const }],
+        members: [{ projectId: "p1", role: "前端" }],
         createdAt: new Date().toISOString(),
         lastUpdatedAt: new Date().toISOString(),
       });
       store.updateGroup("g1", {
         name: "New",
         members: [
-          { projectId: "p1", role: "consumer" as const },
-          { projectId: "p2", role: "library" as const },
+          { projectId: "p1", role: "前端" },
+          { projectId: "p2", role: "组件库" },
         ],
       });
       const g = store.getGroup("g1")!;
@@ -86,7 +104,7 @@ describe("ProjectStore groups", () => {
       store.addGroup({
         id: "g1",
         name: "Edu",
-        members: [{ projectId: "p1", role: "consumer" as const }],
+        members: [{ projectId: "p1", role: "前端" }],
         createdAt: new Date().toISOString(),
         lastUpdatedAt: new Date().toISOString(),
       });
@@ -126,25 +144,30 @@ describe("ProjectStore groups", () => {
       store.addGroup({
         id: "g1",
         name: "Edu",
-        members: [{ projectId: "p1", role: "consumer" as const }],
+        members: [{ projectId: "p1", role: "前端" }],
         createdAt: new Date().toISOString(),
         lastUpdatedAt: new Date().toISOString(),
       });
     });
 
     it("adds a new member", () => {
-      store.addGroupMember("g1", { projectId: "p2", role: "library" as const });
+      store.addGroupMember("g1", { projectId: "p2", role: "组件库" });
       expect(store.getGroup("g1")!.members).toHaveLength(2);
     });
 
     it("does not duplicate existing member", () => {
-      store.addGroupMember("g1", { projectId: "p1", role: "library" as const });
+      store.addGroupMember("g1", { projectId: "p1", role: "组件库" });
       expect(store.getGroup("g1")!.members).toHaveLength(1);
     });
 
     it("updates member role", () => {
-      store.updateGroupMemberRole("g1", "p1", "shared" as const);
-      expect(store.getGroup("g1")!.members[0]!.role).toBe("shared");
+      store.updateGroupMemberRole("g1", "p1", "共享模块");
+      expect(store.getGroup("g1")!.members[0]!.role).toBe("共享模块");
+    });
+
+    it("clears member role when undefined", () => {
+      store.updateGroupMemberRole("g1", "p1", undefined);
+      expect(store.getGroup("g1")!.members[0]!.role).toBeUndefined();
     });
 
     it("removes a member", () => {
@@ -159,9 +182,9 @@ describe("ProjectStore groups", () => {
         id: "g1",
         name: "Edu",
         members: [
-          { projectId: "p1", role: "consumer" as const },
-          { projectId: "p2", role: "library" as const },
-          { projectId: "p3", role: "shared" as const },
+          { projectId: "p1", role: "前端" },
+          { projectId: "p2", role: "组件库" },
+          { projectId: "p3" },
         ],
         createdAt: new Date().toISOString(),
         lastUpdatedAt: new Date().toISOString(),
@@ -176,14 +199,14 @@ describe("ProjectStore groups", () => {
       store.addGroup({
         id: "g1",
         name: "Edu",
-        members: [{ projectId: "p-shared", role: "shared" as const }],
+        members: [{ projectId: "p-shared", role: "共享" }],
         createdAt: new Date().toISOString(),
         lastUpdatedAt: new Date().toISOString(),
       });
       store.addGroup({
         id: "g2",
         name: "Neovate",
-        members: [{ projectId: "p-shared", role: "tool" as const }],
+        members: [{ projectId: "p-shared", role: "工具" }],
         createdAt: new Date().toISOString(),
         lastUpdatedAt: new Date().toISOString(),
       });
@@ -207,5 +230,70 @@ describe("ProjectStore groups", () => {
       expect(pg).toBeDefined();
       expect(pg!.name).toBe("Playground");
     });
+  });
+});
+
+describe("ProjectStore role migration", () => {
+  beforeEach(() => {
+    sharedStores.clear();
+  });
+
+  function findStoreByName(name: string): Record<string, unknown> | undefined {
+    for (const [key, value] of sharedStores.entries()) {
+      if (key.endsWith(`::${name}`)) return value;
+    }
+    return undefined;
+  }
+
+  it("resets legacy enum role values to undefined on first load", () => {
+    // Seed pre-existing data simulating the old shape (enum role fields).
+    const seeded = new ProjectStore();
+    void seeded;
+    const data = findStoreByName("projects");
+    expect(data).toBeTruthy();
+    const legacy = [
+      {
+        id: "g1",
+        name: "Edu",
+        members: [
+          { projectId: "p1", role: "consumer" },
+          { projectId: "p2", role: "library" },
+        ],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        lastUpdatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+    data!.groups = legacy;
+    delete data!.groupsRoleMigrationVersion;
+
+    // Re-instantiate; migration should run because version is missing.
+    const store = new ProjectStore();
+    const groups = store.getGroups();
+    expect(groups[0]!.members.every((m) => m.role === undefined)).toBe(true);
+    expect(data!.groupsRoleMigrationVersion).toBe("v1");
+  });
+
+  it("does NOT clobber roles after migration is already done", () => {
+    const seeded = new ProjectStore();
+    seeded.addGroup({
+      id: "g1",
+      name: "Edu",
+      members: [{ projectId: "p1", role: "我亲手填的" }],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUpdatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    // seeded constructor already set version to "v1"
+    const data = findStoreByName("projects");
+    expect(data!.groupsRoleMigrationVersion).toBe("v1");
+
+    // Re-instantiate; migration is a no-op because version === "v1".
+    const store = new ProjectStore();
+    expect(store.getGroup("g1")!.members[0]!.role).toBe("我亲手填的");
+  });
+
+  it("sets the migration version flag even when groups list is empty", () => {
+    new ProjectStore();
+    const data = findStoreByName("projects");
+    expect(data!.groupsRoleMigrationVersion).toBe("v1");
   });
 });
