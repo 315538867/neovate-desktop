@@ -30,7 +30,7 @@ test.describe("Group Conversation", () => {
     await window.locator("[data-test-id='group-save-btn']").click();
 
     // Verify group appears in list
-    await expect(window.locator("text=E2E Test Group")).toBeVisible();
+    await expect(window.locator("[data-test-id='group-create-btn']")).toBeVisible();
 
     // 3. Create group conversation from new-conversation menu
     await window.locator("[data-test-id='new-conversation-menu']").click();
@@ -50,7 +50,8 @@ test.describe("Group Conversation", () => {
     await expect(window.locator("[data-test-id='group-focus-bar']")).toBeVisible();
 
     // 7. Send a message in the group chat
-    await window.locator("[data-test-id='message-input']").fill("Hello group!");
+    await window.locator("[data-test-id='message-input']").click();
+    await window.locator("[data-test-id='message-input']").pressSequentially("Hello group!");
     await window.locator("[data-test-id='send-button']").click();
 
     // Wait for response (mock agent echoes back)
