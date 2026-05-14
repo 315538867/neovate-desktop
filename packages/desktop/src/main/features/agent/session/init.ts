@@ -146,7 +146,10 @@ export function buildQueryOptions(
 
       // guard.allow=true 但 unchecked (Bash等): 让 SDK 自己处理
       // 或 guard.allow=false 但可提升: 创建 pending request
-      const { promise, resolve } = Promise.withResolvers<PermissionResult>();
+      let resolve: (value: PermissionResult) => void;
+      const promise = new Promise<PermissionResult>((r) => {
+        resolve = r;
+      });
       let settled = false;
       const settle = (result: PermissionResult): boolean => {
         if (settled) return false;
