@@ -59,7 +59,7 @@ export function GroupFocusBar({ session }: { session: ChatSession }) {
 
   return (
     <>
-      <div className="flex flex-col gap-2 border-b px-4 py-2">
+      <div className="flex flex-col gap-2 border-b px-4 py-2" data-test-id="group-focus-bar">
         <div className="flex items-center gap-1.5 text-xs">
           <Layers size={12} strokeWidth={1.5} className="text-muted-foreground" />
           <span className="font-medium text-foreground/80">{group.name}</span>
@@ -114,6 +114,7 @@ export function GroupFocusBar({ session }: { session: ChatSession }) {
               <button
                 key={m.projectId}
                 type="button"
+                data-test-id="member-chip"
                 className="inline-flex cursor-pointer items-center rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
                 onClick={() => addElevatedProject(session.sessionId, m.projectId)}
                 title={t("group.elevateTooltip", "授予 {{name}} 写权限", {

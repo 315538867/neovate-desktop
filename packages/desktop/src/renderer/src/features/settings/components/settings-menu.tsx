@@ -87,6 +87,7 @@ export const SettingsMenu = ({
               }}
               onClick={() => onMenuSelect(item.id)}
               data-track-id="settings.tab.navigated"
+              data-test-id={`settings-nav-${item.id}`}
             >
               <Icon className={cn("size-[18px]", isActive && "text-primary")} />
               <span>{t(MENU_LABEL_KEYS[item.id])}</span>

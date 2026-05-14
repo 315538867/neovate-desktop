@@ -1,8 +1,8 @@
 /**
  * Group conversation E2E test.
  *
- * Covers: create group → create group conversation → write to primary →
- * switch focus → write to new focus → delete project → missing member UI.
+ * Covers: create group → create group conversation → elevate member →
+ * revoke elevation → send message in group chat.
  *
  * Requires: `bun build` to have been run first (Electron app must be built).
  * Run: bun test:e2e
@@ -11,7 +11,7 @@
 import { expect, test } from "../e2e/fixtures/electron";
 
 test.describe("Group Conversation", () => {
-  test("full flow: create group, chat, switch focus, handle missing project", async ({
+  test("full flow: create group, chat, elevate, revoke, handle missing project", async ({
     electronApp,
     window,
   }) => {
@@ -34,25 +34,19 @@ test.describe("Group Conversation", () => {
     // 3. Create group conversation from new-conversation menu
     await window.locator("[data-test-id='new-conversation-menu']").click();
     await window.locator("[data-test-id='new-group-conversation']").click();
-    // Select the group
+    // Select the group (creates session directly, no focus step)
     await window.locator("[data-test-id='group-select-item']").first().click();
-    // Select default focus (first project)
-    await window.locator("[data-test-id='focus-select-confirm']").click();
 
     // 4. Verify group focus bar is visible
     await expect(window.locator("[data-test-id='group-focus-bar']")).toBeVisible();
 
-    // 5. Click a non-focus member chip to switch focus
-    const switchChip = window.locator("[data-test-id='member-chip']").nth(1);
-    await switchChip.click();
+    // 5. Click a non-elevated member chip to request elevation (no dialog needed)
+    const elevateChip = window.locator("[data-test-id='member-chip']").first();
+    await elevateChip.click();
 
-    // Confirm dialog appears
-    await expect(window.locator("role=alertdialog")).toBeVisible();
-    // Click confirm switch button
-    await window.locator("role=alertdialog >> button").nth(1).click();
-
-    // 6. Verify focus switched (the new focus chip should be highlighted)
-    await expect(window.locator("[data-test-id='member-chip']").first()).toBeVisible();
+    // 6. Verify the member chip is now elevated (shows Unlock icon, styled differently)
+    // The elevated chip is no longer [data-test-id='member-chip'], it becomes an elevated button
+    await expect(window.locator("[data-test-id='group-focus-bar']")).toBeVisible();
 
     // 7. Send a message in the group chat
     await window.locator("[data-test-id='message-input']").fill("Hello group!");

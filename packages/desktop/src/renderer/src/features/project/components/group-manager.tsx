@@ -30,7 +30,12 @@ export function GroupManager({ groups, loading, onRefresh }: GroupManagerProps) 
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-muted-foreground">已建 {groups.length} 个分组</h3>
-        <Button variant="outline" size="sm" onClick={() => setCreating(true)}>
+        <Button
+          data-test-id="group-create-btn"
+          variant="outline"
+          size="sm"
+          onClick={() => setCreating(true)}
+        >
           <PlusIcon className="size-4 mr-1" />
           新建分组
         </Button>

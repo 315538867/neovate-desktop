@@ -156,6 +156,7 @@ export function InputToolbar({
           }
           disabled={disabled}
           onClick={onSend}
+          data-test-id="send-button"
           title={sendMessageWith === "cmdEnter" ? t("chat.sendCmdEnter") : t("chat.sendEnter")}
         >
           <ArrowUp className="h-3.5 w-3.5" strokeWidth={2.5} />

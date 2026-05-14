@@ -112,7 +112,12 @@ export function GroupDetail({ group, onBack, onSaved }: GroupDetailProps) {
       {/* Name */}
       <div className="space-y-1">
         <label className="text-sm text-muted-foreground">名称</label>
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="输入分组名称" />
+        <Input
+          data-test-id="group-name-input"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="输入分组名称"
+        />
       </div>
 
       {/* Members */}
@@ -183,7 +188,7 @@ export function GroupDetail({ group, onBack, onSaved }: GroupDetailProps) {
           <Button variant="outline" size="sm" onClick={onBack} disabled={saving}>
             取消
           </Button>
-          <Button size="sm" onClick={handleSave} disabled={saving}>
+          <Button data-test-id="group-save-btn" size="sm" onClick={handleSave} disabled={saving}>
             {saving ? "保存中..." : "保存"}
           </Button>
         </div>

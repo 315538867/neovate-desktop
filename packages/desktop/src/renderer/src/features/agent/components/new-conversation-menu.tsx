@@ -79,6 +79,7 @@ export function NewConversationMenu({ projectPath }: { projectPath?: string }) {
     <div className="relative">
       <button
         className="group flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-sm font-medium text-sidebar-foreground/80 transition-colors hover:bg-accent/50 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+        data-test-id="new-conversation-menu"
         onClick={() => {
           if (!hasGroups) {
             handleNewSingleSession();
@@ -119,7 +120,7 @@ export function NewConversationMenu({ projectPath }: { projectPath?: string }) {
                 </button>
                 <button
                   className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent disabled:opacity-40"
-                  onClick={() => setStep("selectGroup")}
+                  data-test-id="new-group-conversation"
                 >
                   <Layers size={14} strokeWidth={1.5} />
                   {t("project.groupChat", "在分组里聊")}
@@ -144,6 +145,7 @@ export function NewConversationMenu({ projectPath }: { projectPath?: string }) {
                 {groups.map((g) => (
                   <button
                     key={g.id}
+                    data-test-id="group-select-item"
                     className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent disabled:opacity-40"
                     onClick={() => handleSelectGroup(g.id)}
                     disabled={creating}

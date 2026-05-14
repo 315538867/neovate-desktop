@@ -547,7 +547,7 @@ export function MessageInput({
           )}
         </AnimatePresence>
         <AttachmentPreview attachments={attachments} onRemove={removeAttachment} />
-        <div data-has-suggestion={promptSuggestion ? "" : undefined}>
+        <div data-has-suggestion={promptSuggestion ? "" : undefined} data-test-id="message-input">
           <EditorContent editor={editor} />
         </div>
         <InputToolbar

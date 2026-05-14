@@ -43,7 +43,7 @@ export function UserMenu() {
 
         <MenuSeparator />
 
-        <MenuItem onClick={() => setShowSettings(true)}>
+        <MenuItem onClick={() => setShowSettings(true)} data-test-id="settings-trigger">
           <HugeiconsIcon icon={Settings03Icon} size={14} strokeWidth={1.5} className="opacity-60" />
           <span>{t("user.settings")}</span>
         </MenuItem>
