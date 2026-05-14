@@ -85,7 +85,6 @@ export const sessionRouter = os.session.router({
           explicitProviderId: input.providerId,
           kind: input.kind,
           groupId: input.groupId,
-          focusProjectId: input.focusProjectId,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to create session";
@@ -216,11 +215,6 @@ export const sessionRouter = os.session.router({
     await writeFile(filePath, input.plan, "utf8");
     agentLog("savePlan: saved to %s", filePath);
     return { path: filePath };
-  }),
-
-  setFocusProject: os.session.setFocusProject.handler(({ input, context }) => {
-    agentLog("setFocusProject: sessionId=%s projectId=%s", input.sessionId, input.projectId);
-    context.sessionManager.setFocusProject(input.sessionId, input.projectId);
   }),
 
   setModelSetting: os.session.setModelSetting.handler(async ({ input, context }) => {

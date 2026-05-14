@@ -23,6 +23,7 @@ import { randomUUID } from "node:crypto";
 
 import type { ClaudeCodeUIMessage } from "../../../../shared/claude-code/types";
 import type { ConversationKind, ModelScope } from "../../../../shared/features/agent/types";
+import type { ProjectGroup } from "../../../../shared/features/project/types";
 import type { ConfigStore } from "../../config/config-store";
 import type { GroupService } from "../../project/group-service";
 import type { ProjectStore } from "../../project/project-store";
@@ -32,6 +33,7 @@ import type { GroupMemberSnapshot } from "./types";
 import { sessionMessagesToUIMessages } from "../utils/session-messages-to-ui-messages";
 import { initSessionWithTimeout } from "./init";
 import { resolveProviderAndModelForCreate, resolveProviderAndModelForLoad } from "./resolve";
+import { appendSessionMeta, readSessionMeta } from "./store";
 
 /**
  * Bundle of manager-owned state that the createSession/loadSession
@@ -53,7 +55,6 @@ export interface CreateSessionParams {
   explicitProviderId?: string | null;
   kind?: ConversationKind;
   groupId?: string;
-  focusProjectId?: string;
 }
 
 /** Start a new session. */
@@ -68,37 +69,33 @@ export async function createSession(
     providerId?: string;
   } & Awaited<ReturnType<Query["initializationResult"]>>
 > {
-  const { cwd, model, explicitProviderId, kind, groupId, focusProjectId } = params;
+  const { cwd, model, explicitProviderId, kind, groupId } = params;
   const { configStore, projectStore, groupService, initContext, log } = ctx;
   const sessionId = randomUUID();
 
   // Resolve group context
+  let group: ProjectGroup | undefined;
   let groupMembers: GroupMemberSnapshot[] | undefined;
   let effectiveCwd = cwd;
   let effectiveKind: ConversationKind = kind ?? "single";
-  let effectiveFocusProjectId = focusProjectId;
 
-  if (effectiveKind === "group" && groupId && focusProjectId) {
-    const group = groupService.getGroup(groupId);
-    if (!group) {
+  if (effectiveKind === "group" && groupId) {
+    const resolvedGroup = groupService.getGroup(groupId);
+    if (!resolvedGroup) {
       throw Object.assign(new Error(`Group not found: ${groupId}`), { code: "GROUP_NOT_FOUND" });
     }
-    const expanded = groupService.expandMembers(group);
+    group = resolvedGroup;
+    const expanded = groupService.expandMembers(resolvedGroup);
     groupMembers = expanded;
 
-    // Validate focus project
-    const focus = expanded.find((m) => m.projectId === focusProjectId);
-    if (!focus) {
-      throw Object.assign(new Error(`Focus project ${focusProjectId} not in group ${groupId}`), {
-        code: "FOCUS_NOT_IN_GROUP",
+    // 全只读模式：选取第一个非 missing 成员的路径作为 cwd
+    const firstAvailable = expanded.find((m) => !m.missing);
+    if (!firstAvailable || !firstAvailable.path) {
+      throw Object.assign(new Error(`All members of group ${groupId} are missing on disk`), {
+        code: "GROUP_ALL_MEMBERS_MISSING",
       });
     }
-    if (focus.missing) {
-      throw Object.assign(new Error(`Focus project ${focus.name} path is missing`), {
-        code: "FOCUS_PATH_MISSING",
-      });
-    }
-    effectiveCwd = focus.path!;
+    effectiveCwd = firstAvailable.path;
   }
 
   log(
@@ -132,9 +129,21 @@ export async function createSession(
     provider,
     kind: effectiveKind,
     groupId,
-    focusProjectId: effectiveFocusProjectId,
     groupMembers,
+    group,
   });
+
+  // Persist group metadata so the session survives app restart.
+  if (effectiveKind === "group" && groupId) {
+    try {
+      await appendSessionMeta(sessionId, {
+        kind: effectiveKind,
+        groupId,
+      });
+    } catch (err) {
+      log("createSession: appendSessionMeta failed sessionId=%s error=%s", sessionId, String(err));
+    }
+  }
 
   return {
     ...initResult,
@@ -158,7 +167,25 @@ export async function loadSession(
   modelScope?: ModelScope;
   providerId?: string;
 }> {
-  const { configStore, projectStore, initContext, log } = ctx;
+  const { configStore, projectStore, groupService, initContext, log } = ctx;
+
+  // Read persisted group metadata so group sessions survive restarts
+  const sessionMeta = await readSessionMeta(sessionId);
+
+  // Resolve group context for group sessions
+  let kind: ConversationKind = "single";
+  let group: ProjectGroup | undefined;
+  let groupMembers: GroupMemberSnapshot[] | undefined;
+
+  if (sessionMeta?.kind === "group" && sessionMeta.groupId) {
+    const resolvedGroup = groupService.getGroup(sessionMeta.groupId);
+    if (resolvedGroup) {
+      kind = "group";
+      group = resolvedGroup;
+      groupMembers = groupService.expandMembers(resolvedGroup);
+    }
+    // If group was deleted, fall back to "single" (session still loads)
+  }
 
   const { provider, modelSetting } = await resolveProviderAndModelForLoad({
     sessionId,
@@ -178,14 +205,19 @@ export async function loadSession(
       model: modelSetting?.model,
       resume: sessionId,
       provider,
+      kind,
+      groupId: sessionMeta?.groupId,
+      groupMembers,
+      group,
     }),
     getSessionMessages(sessionId, { includeSystemMessages: true }),
   ]);
   const messages = await sessionMessagesToUIMessages(sessionMessages);
 
   log(
-    "loadSession: sessionId=%s raw=%d messages=%d currentModel=%s modelScope=%s providerId=%s",
+    "loadSession: sessionId=%s kind=%s raw=%d messages=%d currentModel=%s modelScope=%s providerId=%s",
     sessionId,
+    kind,
     sessionMessages.length,
     messages.length,
     modelSetting?.model ?? "(default)",

@@ -88,6 +88,8 @@ export async function sendUserMessage(
         createdAt: now,
         updatedAt: now,
         title: text.slice(0, 50),
+        kind: session.kind,
+        groupId: session.groupId,
       },
     });
   }

@@ -91,11 +91,10 @@ export function buildQueryOptions(
     kind?: ConversationKind;
     groupId?: string;
     groupMembers?: GroupMemberSnapshot[];
-    focusProjectId?: string;
     group?: ProjectGroup;
   },
 ): Options {
-  const { sessionId, cwd, model, groupMembers, focusProjectId, group } = params;
+  const { sessionId, cwd, model, groupMembers, group } = params;
   const { configStore, sessions, eventPublisher, log } = ctx;
   const resolved = resolveClaudeCodeExecutable(configStore.get("claudeCodeBinPath") || undefined);
 
@@ -104,12 +103,9 @@ export function buildQueryOptions(
     type: "preset",
     preset: "claude_code",
   };
-  if (group && groupMembers && focusProjectId) {
-    const focus = groupMembers.find((m) => m.projectId === focusProjectId);
-    if (focus && !focus.missing) {
-      const append = renderGroupContext(group, groupMembers, focus);
-      systemPrompt = { type: "preset", preset: "claude_code", append };
-    }
+  if (group && groupMembers) {
+    const append = renderGroupContext(group, groupMembers, null);
+    systemPrompt = { type: "preset", preset: "claude_code", append };
   }
 
   return {
@@ -133,12 +129,23 @@ export function buildQueryOptions(
       const session = sessions.get(sessionId);
       if (!session) throw new Error(`Unknown session: ${sessionId}`);
 
-      // Path-guard: hard check before user permission flow
       const guard = checkToolPath(toolName, input as Record<string, unknown>, session);
-      if (!guard.allow) {
-        return { behavior: "deny", message: guard.reason };
+
+      // Path guard 已检查并放行 → 直接允许
+      if (guard.allow && guard.checked) {
+        return { behavior: "allow" };
       }
 
+      if (!guard.allow) {
+        // 不可提升 → 硬拒
+        if (!guard.elevation) {
+          return { behavior: "deny", message: guard.reason };
+        }
+        // 可提升：落到权限请求流，带 elevation 元数据
+      }
+
+      // guard.allow=true 但 unchecked (Bash等): 让 SDK 自己处理
+      // 或 guard.allow=false 但可提升: 创建 pending request
       const { promise, resolve } = Promise.withResolvers<PermissionResult>();
       let settled = false;
       const settle = (result: PermissionResult): boolean => {
@@ -159,11 +166,18 @@ export function buildQueryOptions(
           eventPublisher.publish(sessionId, { kind: "request_settled", requestId });
         }
       };
+      const elevation = !guard.allow ? guard.elevation : undefined;
       session.pendingRequests.set(requestId, { resolve: settle });
       eventPublisher.publish(sessionId, {
         kind: "request",
         requestId,
-        request: { type: "permission_request", toolName, input, options },
+        request: {
+          type: "permission_request",
+          toolName,
+          input,
+          options,
+          ...(elevation ? { elevation } : {}),
+        },
       });
       signal.addEventListener("abort", onAbort, { once: true });
       return promise;
@@ -189,7 +203,6 @@ export async function initSession(
     provider?: Provider;
     kind?: ConversationKind;
     groupId?: string;
-    focusProjectId?: string;
     groupMembers?: GroupMemberSnapshot[];
     group?: ProjectGroup;
   },
@@ -282,7 +295,6 @@ export async function initSession(
     model: opts?.model,
     kind,
     groupMembers: opts?.groupMembers,
-    focusProjectId: opts?.focusProjectId,
     group: opts?.group,
   });
   // Merge plugin-contributed hooks and MCP servers
@@ -297,10 +309,10 @@ export async function initSession(
     (merged.hooks.PreToolUse ??= []).push({ matcher: "Bash", hooks: [rtkHook] });
   }
 
-  // Focus hint hook for group sessions: inject pendingHint as
+  // Hint hook for group sessions: inject pendingHint as
   // additionalContext on UserPromptSubmit, then clear it.
   if (kind === "group") {
-    const focusHintHook: HookCallback = async (input) => {
+    const pendingHintHook: HookCallback = async (input) => {
       if (input.hook_event_name !== "UserPromptSubmit") return { continue: true };
       const entry = ctx.sessions.get(sessionId);
       if (!entry?.pendingHint) return { continue: true };
@@ -313,7 +325,7 @@ export async function initSession(
         },
       };
     };
-    (merged.hooks.UserPromptSubmit ??= []).push({ hooks: [focusHintHook] });
+    (merged.hooks.UserPromptSubmit ??= []).push({ hooks: [pendingHintHook] });
 
     // Bash PreToolUse soft-log for group sessions: detect write-like
     // commands that may cross project boundaries. Never blocks — only
@@ -338,10 +350,10 @@ export async function initSession(
       for (const pat of patterns) {
         if (pat.test(cmd)) {
           bashOofLog(
-            "sessionId=%s groupId=%s focusProjectId=%s command=%s pattern=%s",
+            "sessionId=%s groupId=%s elevated=%o command=%s pattern=%s",
             sessionId,
             opts?.groupId ?? "-",
-            opts?.focusProjectId ?? "-",
+            Array.from(ctx.sessions.get(sessionId)?.elevatedProjectIds ?? []),
             cmd.slice(0, 200),
             pat.source,
           );
@@ -396,7 +408,6 @@ export async function initSession(
     pendingRequests,
     kind,
     groupId: opts?.groupId,
-    focusProjectId: opts?.focusProjectId,
     groupMembers: opts?.groupMembers,
   });
   log(
@@ -438,7 +449,6 @@ export async function initSessionWithTimeout(
     provider?: Provider;
     kind?: ConversationKind;
     groupId?: string;
-    focusProjectId?: string;
     groupMembers?: GroupMemberSnapshot[];
     group?: ProjectGroup;
   },

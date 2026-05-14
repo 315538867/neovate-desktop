@@ -79,7 +79,6 @@ export class SessionManager {
     {
       kind?: string;
       groupId?: string;
-      focusProjectId?: string;
       groupMembers?: GroupMemberSnapshot[];
     }
   >();
@@ -159,7 +158,7 @@ export class SessionManager {
       providerId: session.providerId,
       kind: session.kind,
       groupId: session.groupId,
-      focusProjectId: session.focusProjectId,
+      elevatedProjectIds: session.elevatedProjectIds ? [...session.elevatedProjectIds] : undefined,
     }));
   }
 
@@ -183,47 +182,12 @@ export class SessionManager {
     const results: { sessionId: string; groupId: string }[] = [];
     for (const [sessionId, session] of this.sessions) {
       if (session.kind === "group" && session.groupId) {
-        if (
-          session.focusProjectId === projectId ||
-          session.groupMembers?.some((m) => m.projectId === projectId)
-        ) {
+        if (session.groupMembers?.some((m) => m.projectId === projectId)) {
           results.push({ sessionId, groupId: session.groupId });
         }
       }
     }
     return results;
-  }
-
-  /**
-   * Switch the focus project for a group session.
-   * Validates the project is a non-missing member, updates the session entry,
-   * and queues a hint for the next UserPromptSubmit hook.
-   */
-  setFocusProject(sessionId: string, projectId: string): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Unknown session: ${sessionId}`);
-    if (session.kind !== "group") {
-      throw new Error(`Session ${sessionId} is not a group session`);
-    }
-
-    const member = session.groupMembers?.find((m) => m.projectId === projectId);
-    if (!member) {
-      throw new Error(`Project ${projectId} is not a member of this group`);
-    }
-    if (member.missing) {
-      throw new Error(`Project ${member.name} path is missing, cannot switch focus`);
-    }
-
-    const oldFocus = session.groupMembers?.find((m) => m.projectId === session.focusProjectId);
-    session.focusProjectId = projectId;
-    session.pendingHint = `焦点已切换到 ${member.name} (${member.role}, ${member.path})。从此 turn 起，写操作默认作用于该项目。`;
-
-    log(
-      "setFocusProject: sessionId=%s from=%s to=%s",
-      sessionId,
-      oldFocus?.name ?? "(none)",
-      member.name,
-    );
   }
 
   /**
@@ -241,16 +205,6 @@ export class SessionManager {
     for (const [sessionId, session] of this.sessions) {
       if (session.kind === "group" && session.groupId === groupId) {
         session.groupMembers = expanded;
-
-        // If current focus was removed or went missing, clear it
-        if (session.focusProjectId) {
-          const stillValid = expanded.find(
-            (m) => m.projectId === session.focusProjectId && !m.missing,
-          );
-          if (!stillValid) {
-            session.focusProjectId = undefined;
-          }
-        }
 
         session.pendingHint = `分组成员已更新：${expanded.map((m) => `${m.name} (${m.role})`).join("、")}。`;
         log("onGroupChanged: refreshed snapshot for sessionId=%s", sessionId);
@@ -361,7 +315,6 @@ export class SessionManager {
       this.pendingArchiveMeta.set(sessionId, {
         kind: session.kind,
         groupId: session.groupId,
-        focusProjectId: session.focusProjectId,
         groupMembers: session.groupMembers,
       });
     }
@@ -430,7 +383,7 @@ export class SessionManager {
     const session = this.sessions.get(sessionId);
     if (!session || !session.consumeExited) return;
 
-    const { cwd, model, kind, groupMembers, focusProjectId } = session;
+    const { cwd, model, kind, groupMembers } = session;
 
     // Build fresh query options (canUseTool, permissions, etc.)
     const queryOpts = buildQueryOptions(this.facadeContext.initContext, {
@@ -439,7 +392,6 @@ export class SessionManager {
       model,
       kind,
       groupMembers,
-      focusProjectId,
     });
 
     log("restartConsume: creating new query sessionId=%s", sessionId);

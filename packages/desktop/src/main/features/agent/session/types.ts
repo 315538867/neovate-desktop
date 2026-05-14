@@ -16,7 +16,7 @@ export type PendingRequestResolver = (result: PermissionResult) => void;
 /** 组成员的展开信息（路径快照，启动时计算） */
 export type GroupMemberSnapshot = {
   projectId: string;
-  role: string;
+  role?: string;
   path: string | null;
   name: string;
   missing: boolean;
@@ -40,12 +40,12 @@ export interface SessionEntry {
   kind: ConversationKind;
   /** 分组 id（kind === "group" 时） */
   groupId?: string;
-  /** 当前聚焦项目 id（kind === "group" 时） */
-  focusProjectId?: string;
   /** 组对话：成员路径快照 */
   groupMembers?: GroupMemberSnapshot[];
-  /** 待在下一次 UserPromptSubmit hook 注入的提示（如 focus 切换、成员变更） */
+  /** 待在下一次 UserPromptSubmit hook 注入的提示（如成员变更） */
   pendingHint?: string;
+  /** 组对话：本会话内已临时授权可写的项目 id 集合（不持久化，内存级） */
+  elevatedProjectIds?: Set<string>;
 }
 
 /** Timeout for SDK `initializationResult()` to prevent hanging sessions. */

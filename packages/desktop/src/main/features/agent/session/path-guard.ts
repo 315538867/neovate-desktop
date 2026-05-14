@@ -42,7 +42,9 @@ function isWithin(parent: string | null, child: string): boolean {
   }
 }
 
-export type GuardResult = { allow: true } | { allow: false; reason: string };
+export type GuardResult =
+  | { allow: true; checked: boolean }
+  | { allow: false; reason: string; elevation?: { projectId: string; projectName: string } };
 
 export function checkToolPath(
   toolName: string,
@@ -50,41 +52,48 @@ export function checkToolPath(
   session: SessionEntry,
 ): GuardResult {
   const filePath = extractPath(toolName, input);
-  if (!filePath) return { allow: true };
+  // 无路径字段的工具（Bash 等）：不在此校验
+  if (!filePath) return { allow: true, checked: false };
 
   // single: 在 cwd 之内放行
   if (session.kind === "single") {
-    if (isWithin(session.cwd, filePath)) return { allow: true };
+    if (isWithin(session.cwd, filePath)) return { allow: true, checked: true };
     return { allow: false, reason: `路径 ${filePath} 不在项目 ${session.cwd} 内` };
   }
 
-  // group
-  const focus = session.groupMembers!.find((m) => m.projectId === session.focusProjectId);
-  if (!focus || focus.missing) {
-    return { allow: false, reason: "当前聚焦项目已不存在或路径丢失，请先在 UI 切换聚焦项目" };
-  }
-
+  // group: 全只读模式，所有写操作需 elevation，读操作全部放行
   const isWrite = WRITE_TOOLS.has(toolName);
   const isRead = READ_TOOLS.has(toolName);
 
   if (isWrite) {
-    if (isWithin(focus.path, filePath)) return { allow: true };
+    // 写到已提升项目：放行
+    const elevated = session.elevatedProjectIds;
+    if (elevated && elevated.size > 0) {
+      const inElevated = session.groupMembers!.find(
+        (m) => !m.missing && elevated.has(m.projectId) && isWithin(m.path, filePath),
+      );
+      if (inElevated) return { allow: true, checked: true };
+    }
+
+    // 写到任一成员：deny + 携带 elevation 元数据（可提升）
     const refMember = session.groupMembers!.find((m) => !m.missing && isWithin(m.path, filePath));
     if (refMember) {
       return {
         allow: false,
-        reason: `${filePath} 属于组成员 ${refMember.name}（${refMember.role}），仅当前聚焦项目 ${focus.name} 可写。如需修改，请告知用户切换聚焦项目。`,
+        reason: `当前为全只读模式；${filePath} 属于组成员 ${refMember.name}，可向用户征询是否允许在本会话内放行该项目的写权限。`,
+        elevation: { projectId: refMember.projectId, projectName: refMember.name },
       };
     }
+
     return { allow: false, reason: `${filePath} 不在分组任何成员内` };
   }
 
   if (isRead) {
     if (session.groupMembers!.some((m) => !m.missing && isWithin(m.path, filePath)))
-      return { allow: true };
+      return { allow: true, checked: true };
     return { allow: false, reason: `${filePath} 不在分组任何成员内` };
   }
 
   // 其他工具（Bash 等）：不在此校验
-  return { allow: true };
+  return { allow: true, checked: false };
 }
