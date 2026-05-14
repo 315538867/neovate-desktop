@@ -32,6 +32,9 @@ test.describe("Group Conversation", () => {
     // Verify group appears in list
     await expect(window.locator("[data-test-id='group-create-btn']")).toBeVisible();
 
+    // Close settings panel to return to main UI
+    await window.locator("[data-test-id='settings-back-btn']").click();
+
     // 3. Create group conversation from new-conversation menu
     await window.locator("[data-test-id='new-conversation-menu']").click();
     await window.locator("[data-test-id='new-group-conversation']").click();

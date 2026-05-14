@@ -121,6 +121,7 @@ export function NewConversationMenu({ projectPath }: { projectPath?: string }) {
                 <button
                   className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent disabled:opacity-40"
                   data-test-id="new-group-conversation"
+                  onClick={() => setStep("selectGroup")}
                 >
                   <Layers size={14} strokeWidth={1.5} />
                   {t("project.groupChat", "在分组里聊")}
