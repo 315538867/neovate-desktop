@@ -25,8 +25,12 @@ test.describe("Group Conversation", () => {
     await window.locator("[data-test-id='settings-nav-groups']").click();
     await window.locator("[data-test-id='group-create-btn']").click();
 
-    // Fill group name
+    // Fill group name and add a project member
     await window.locator("[data-test-id='group-name-input']").fill("E2E Test Group");
+    await window.locator("[data-test-id='add-member-btn']").click();
+    // Select first available project in the picker dialog
+    await window.locator("[data-test-id='member-picker-item']").first().click();
+    await window.locator("[data-test-id='member-picker-confirm']").click();
     await window.locator("[data-test-id='group-save-btn']").click();
 
     // Verify group appears in list

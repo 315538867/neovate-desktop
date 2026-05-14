@@ -124,7 +124,12 @@ export function GroupDetail({ group, onBack, onSaved }: GroupDetailProps) {
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label className="text-sm text-muted-foreground">成员 ({members.length})</label>
-          <Button variant="ghost" size="sm" onClick={() => setPickerOpen(true)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            data-test-id="add-member-btn"
+            onClick={() => setPickerOpen(true)}
+          >
             + 添加项目
           </Button>
         </div>

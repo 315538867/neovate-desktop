@@ -106,6 +106,7 @@ export function MemberPicker({
                   return (
                     <label
                       key={p.id}
+                      data-test-id="member-picker-item"
                       className={cn(
                         "flex items-start gap-3 p-2 rounded-md transition-colors",
                         already
@@ -151,7 +152,12 @@ export function MemberPicker({
               <Button variant="outline" size="sm" onClick={handleCancel}>
                 取消
               </Button>
-              <Button size="sm" onClick={handleConfirm} disabled={selected.size === 0}>
+              <Button
+                data-test-id="member-picker-confirm"
+                size="sm"
+                onClick={handleConfirm}
+                disabled={selected.size === 0}
+              >
                 添加 {selected.size} 个项目
               </Button>
             </div>
