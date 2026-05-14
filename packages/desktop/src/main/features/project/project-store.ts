@@ -36,6 +36,30 @@ export class ProjectStore {
       },
       serialize: (value) => JSON.stringify(value, null, 2) + "\n",
     });
+
+    this.migrateGroupRolesToFreeText();
+  }
+
+  /**
+   * One-time migration: legacy enum role values (`library`/`consumer`/...)
+   * are reset to `undefined` so that the new free-text role field starts
+   * clean. Marked done by `groupsRoleMigrationVersion === "v1"` to avoid
+   * clobbering subsequent user-entered text.
+   */
+  private migrateGroupRolesToFreeText(): void {
+    if (this.store.get("groupsRoleMigrationVersion") === "v1") return;
+    const groups = this.store.get("groups") ?? [];
+    if (groups.length > 0) {
+      log("migrating legacy enum roles to free-text (reset to undefined)", {
+        groupCount: groups.length,
+      });
+      const migrated = groups.map((g) => ({
+        ...g,
+        members: g.members.map((m) => ({ projectId: m.projectId, role: undefined })),
+      }));
+      this.store.set("groups", migrated);
+    }
+    this.store.set("groupsRoleMigrationVersion", "v1");
   }
 
   getAll(): Project[] {
