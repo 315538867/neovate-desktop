@@ -68,7 +68,15 @@ export function useLoadSession(fallbackCwd?: string) {
         // so React render finds getChat() ready before useClaudeCodeChat runs
         createSession(
           sessionId,
-          info ? { title: info.title, createdAt: info.createdAt, cwd: info.cwd } : undefined,
+          info
+            ? {
+                title: info.title,
+                createdAt: info.createdAt,
+                cwd: info.cwd,
+                kind: info.kind,
+                groupId: info.groupId,
+              }
+            : undefined,
         );
 
         if (commands?.length) {

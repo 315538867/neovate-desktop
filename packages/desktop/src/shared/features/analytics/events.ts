@@ -9,6 +9,12 @@ export const programmaticEventSchemas = {
       })
       .optional(),
   }),
+  "group.bash.oof": z.object({
+    sessionId: z.string(),
+    groupId: z.string(),
+    command: z.string(),
+    pattern: z.string(),
+  }),
 } satisfies Record<`${string}.${string}.${string}`, z.ZodObject<z.ZodRawShape>>;
 
 export type ProgrammaticEventName = keyof typeof programmaticEventSchemas;

@@ -30,6 +30,16 @@ import type { ProjectInfo } from "../../../../../shared/features/project/types";
 
 import { PLAYGROUND_PROJECT_ID } from "../../../../../shared/features/project/constants";
 import { Accordion, AccordionItem, AccordionPanel } from "../../../components/ui/accordion";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "../../../components/ui/alert-dialog";
+import { Button } from "../../../components/ui/button";
 import { useProject } from "../../project/hooks/use-project";
 import { useProjectStore } from "../../project/store";
 import { useLoadSession } from "../hooks/use-load-session";
@@ -54,7 +64,17 @@ const ProjectSessions = memo(function ProjectSessions({ project }: { project: Pr
   const [restoring, setRestoring] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(DEFAULT_SESSION_LIMIT);
 
-  const items = useFilteredSessions({ projectPath: project.path, filter: "unpinned" });
+  const allItems = useFilteredSessions({ projectPath: project.path, filter: "unpinned" });
+
+  // Exclude group sessions — they are rendered by GroupSessionsList
+  const items = useMemo(
+    () =>
+      allItems.filter((item) => {
+        const kind = item.kind === "memory" ? item.session.kind : item.info.kind;
+        return kind !== "group";
+      }),
+    [allItems],
+  );
 
   const visibleItems = items.slice(0, visibleCount);
   const remainingCount = items.length - visibleCount;
@@ -143,16 +163,26 @@ const SortableProjectItem = memo(function SortableProjectItem({
   project,
   closedSet,
   onRemove,
+  onForceRemove,
   onCreateSession,
 }: {
   project: ProjectInfo;
   closedSet: Set<string>;
-  onRemove: (id: string) => void;
+  onRemove: (
+    id: string,
+  ) => Promise<{ blockedBy: { groupId: string; groupName: string }[] } | undefined>;
+  onForceRemove: (id: string) => void;
   onCreateSession: (project: ProjectInfo) => void;
 }) {
+  const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: project.id,
   });
+
+  const [pendingRemove, setPendingRemove] = useState<{
+    id: string;
+    blockedBy: { groupId: string; groupName: string }[];
+  } | null>(null);
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -208,9 +238,12 @@ const SortableProjectItem = memo(function SortableProjectItem({
           {!isPlayground && (
             <button
               className={`flex size-6 items-center justify-center rounded-md transition-all hover:bg-destructive/10 hover:text-destructive ${isStale ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
-              onClick={(e) => {
+              onClick={async (e) => {
                 e.stopPropagation();
-                onRemove(project.id);
+                const res = await onRemove(project.id);
+                if (res?.blockedBy) {
+                  setPendingRemove({ id: project.id, blockedBy: res.blockedBy });
+                }
               }}
               data-track-id="project.folder.removed"
             >
@@ -236,6 +269,43 @@ const SortableProjectItem = memo(function SortableProjectItem({
           <ProjectSessions project={project} />
         </AccordionPanel>
       )}
+
+      <AlertDialog
+        open={pendingRemove !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingRemove(null);
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("project.deleteGroupRefTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("project.deleteGroupRefDescription", {
+                count: pendingRemove?.blockedBy.length ?? 0,
+                groups: pendingRemove?.blockedBy.map((b) => b.groupName).join("、") ?? "",
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose>
+              <Button variant="outline" size="sm">
+                {t("project.cancel")}
+              </Button>
+            </AlertDialogClose>
+            <Button
+              size="sm"
+              onClick={() => {
+                if (!pendingRemove) return;
+                const id = pendingRemove.id;
+                setPendingRemove(null);
+                onForceRemove(id);
+              }}
+            >
+              {t("project.deleteAnyway")}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
     </AccordionItem>
   );
 });
@@ -248,7 +318,7 @@ export const ProjectAccordionList = memo(function ProjectAccordionList() {
   const closedProjectAccordions = useProjectStore((s) => s.closedProjectAccordions);
   const setClosedProjectAccordions = useProjectStore((s) => s.setClosedProjectAccordions);
   const reorderProjects = useProjectStore((s) => s.reorderProjects);
-  const { removeProject, switchProject } = useProject();
+  const { removeProject, forceRemoveProject, switchProject } = useProject();
   const { createNewSession } = useNewSession();
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -349,6 +419,7 @@ export const ProjectAccordionList = memo(function ProjectAccordionList() {
               project={project}
               closedSet={closedSet}
               onRemove={removeProject}
+              onForceRemove={forceRemoveProject}
               onCreateSession={handleCreateSession}
             />
           ))}

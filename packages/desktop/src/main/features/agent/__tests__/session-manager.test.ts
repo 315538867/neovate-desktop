@@ -48,6 +48,17 @@ const makeResultMsg = () => ({
   errors: [],
 });
 
+function makeGroupServiceMock() {
+  const fn = vi.fn<any>;
+  return {
+    getGroup: fn(() => undefined),
+    getGroups: fn(() => []),
+    expandMembers: fn(() => []),
+    findGroupsContainingProject: fn(() => []),
+    getProjectGroupRefs: fn(() => []),
+  };
+}
+
 describe("SessionManager", () => {
   let manager: SessionManager;
 
@@ -61,6 +72,7 @@ describe("SessionManager", () => {
         onTurnEnd: vi.fn(),
         onSessionClosed: vi.fn(),
       } as unknown as import("../../../core/power-blocker-service").PowerBlockerService,
+      makeGroupServiceMock() as any,
     );
   });
 
@@ -78,8 +90,6 @@ describe("SessionManager", () => {
   });
 
   it("enables partial assistant messages in query options", () => {
-    // initContext is owned by facadeContext; manager no longer exposes it
-    // directly because it never dispatches against it as a public surface.
     const initContext = (manager as any).facadeContext.initContext;
     const queryOptions = buildQueryOptions(initContext, {
       sessionId: "session-1",
@@ -134,7 +144,7 @@ describe("SessionManager", () => {
     ).rejects.toThrow("Unknown session");
   });
 
-  it("send() throws if consume loop has exited", async () => {
+  it("send() restarts consume loop when it has exited", async () => {
     const input = { push: vi.fn() };
     const queryMessages = new Pushable<any>();
     const queryIterator = queryMessages[Symbol.asyncIterator]();
@@ -149,8 +159,12 @@ describe("SessionManager", () => {
       query,
       cwd: "/tmp/project",
       consumeExited: true,
+      uiToSdkMessageIds: new Map(),
       pendingRequests: new Map(),
     });
+
+    // Mock restartConsume to avoid dynamic import of @anthropic-ai/claude-agent-sdk
+    const restartSpy = vi.spyOn(manager as any, "restartConsume").mockResolvedValue(undefined);
 
     await expect(
       manager.send("session-1", {
@@ -158,7 +172,10 @@ describe("SessionManager", () => {
         role: "user",
         parts: [{ type: "text", text: "Hello" }],
       } as any),
-    ).rejects.toThrow("consume loop has exited");
+    ).resolves.toBeUndefined();
+
+    expect(restartSpy).toHaveBeenCalledWith("session-1");
+    expect(input.push).toHaveBeenCalled();
   });
 
   it("send() starts requestTracker turn and powerBlocker", async () => {
@@ -292,5 +309,178 @@ describe("SessionManager", () => {
     await consumePromise;
 
     expect((manager as any).powerBlocker.onTurnEnd).toHaveBeenCalledWith("session-1");
+  });
+});
+
+describe("SessionManager — group session", () => {
+  let manager: SessionManager;
+  const groupServiceMock = makeGroupServiceMock();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    manager = new SessionManager(
+      { get: vi.fn(() => undefined) } as unknown as ConfigStore,
+      {} as ProjectStore,
+      new RequestTracker(),
+      {
+        onTurnStart: vi.fn(),
+        onTurnEnd: vi.fn(),
+        onSessionClosed: vi.fn(),
+      } as unknown as import("../../../core/power-blocker-service").PowerBlockerService,
+      groupServiceMock as any,
+    );
+  });
+
+  function setSession(overrides: Record<string, unknown> = {}) {
+    (manager as any).sessions.set("s1", {
+      cwd: "/code/edu-portal",
+      kind: "group",
+      groupId: "g-edu",
+      groupMembers: [
+        {
+          projectId: "p-portal",
+          role: "consumer",
+          path: "/code/edu-portal",
+          name: "edu-portal",
+          missing: false,
+        },
+        {
+          projectId: "p-design",
+          role: "library",
+          path: "/code/edu-design",
+          name: "edu-design",
+          missing: false,
+        },
+      ],
+      input: { push: vi.fn() },
+      query: { next: vi.fn(), interrupt: vi.fn(), setPermissionMode: vi.fn() },
+      consumeExited: false,
+      uiToSdkMessageIds: new Map(),
+      pendingRequests: new Map(),
+      ...overrides,
+    });
+  }
+
+  describe("onGroupChanged", () => {
+    it("refreshes group members snapshot", () => {
+      setSession();
+      const expanded = [
+        {
+          projectId: "p-portal",
+          role: "consumer" as const,
+          path: "/code/edu-portal",
+          name: "edu-portal",
+          missing: false,
+        },
+        {
+          projectId: "p-design",
+          role: "library" as const,
+          path: "/code/edu-design",
+          name: "edu-design",
+          missing: false,
+        },
+        {
+          projectId: "p-new",
+          role: "shared" as const,
+          path: "/code/edu-new",
+          name: "edu-new",
+          missing: false,
+        },
+      ];
+      groupServiceMock.getGroup.mockReturnValue({ id: "g-edu", name: "Edu", members: [] });
+      groupServiceMock.expandMembers.mockReturnValue(expanded);
+
+      manager.onGroupChanged("g-edu");
+
+      const session = (manager as any).sessions.get("s1");
+      expect(session.groupMembers).toBe(expanded);
+      expect(session.pendingHint).toContain("分组成员已更新");
+    });
+
+    it("refreshes members when group membership changes", () => {
+      setSession();
+      const expanded = [
+        {
+          projectId: "p-design",
+          role: "library" as const,
+          path: "/code/edu-design",
+          name: "edu-design",
+          missing: false,
+        },
+      ];
+      groupServiceMock.getGroup.mockReturnValue({ id: "g-edu", name: "Edu", members: [] });
+      groupServiceMock.expandMembers.mockReturnValue(expanded);
+
+      manager.onGroupChanged("g-edu");
+
+      const session = (manager as any).sessions.get("s1");
+      expect(session.groupMembers).toBe(expanded);
+      expect(session.pendingHint).toContain("分组成员已更新");
+    });
+
+    it("refreshes members when members go missing", () => {
+      setSession();
+      const expanded = [
+        {
+          projectId: "p-portal",
+          role: "consumer" as const,
+          path: null,
+          name: "edu-portal",
+          missing: true,
+        },
+        {
+          projectId: "p-design",
+          role: "library" as const,
+          path: "/code/edu-design",
+          name: "edu-design",
+          missing: false,
+        },
+      ];
+      groupServiceMock.getGroup.mockReturnValue({ id: "g-edu", name: "Edu", members: [] });
+      groupServiceMock.expandMembers.mockReturnValue(expanded);
+
+      manager.onGroupChanged("g-edu");
+
+      const session = (manager as any).sessions.get("s1");
+      expect(session.groupMembers).toBe(expanded);
+      expect(session.pendingHint).toContain("分组成员已更新");
+    });
+
+    it("does nothing for non-existent group", () => {
+      setSession();
+      groupServiceMock.getGroup.mockReturnValue(undefined);
+
+      const membersBefore = (manager as any).sessions.get("s1").groupMembers;
+      expect(() => manager.onGroupChanged("g-nonexistent")).not.toThrow();
+      const session = (manager as any).sessions.get("s1");
+      expect(session.groupMembers).toBe(membersBefore); // unchanged
+    });
+
+    it("only affects sessions for the target group", () => {
+      setSession();
+      // Add a second session for a different group
+      (manager as any).sessions.set("s2", {
+        kind: "group",
+        groupId: "g-other",
+        groupMembers: [
+          {
+            projectId: "p-other",
+            role: "consumer",
+            path: "/code/other",
+            name: "other",
+            missing: false,
+          },
+        ],
+        cwd: "/code/other",
+      });
+
+      groupServiceMock.getGroup.mockReturnValue({ id: "g-edu", name: "Edu", members: [] });
+      groupServiceMock.expandMembers.mockReturnValue([]);
+
+      manager.onGroupChanged("g-edu");
+
+      const s2 = (manager as any).sessions.get("s2");
+      expect(s2.groupMembers).toHaveLength(1); // unchanged
+    });
   });
 });

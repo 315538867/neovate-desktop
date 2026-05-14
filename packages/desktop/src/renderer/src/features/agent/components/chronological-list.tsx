@@ -1,5 +1,5 @@
 import debug from "debug";
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useProjectStore } from "../../project/store";
@@ -27,7 +27,17 @@ export const ChronologicalList = memo(function ChronologicalList({
 
   const sessionsLoaded = useAgentStore((s) => s.sessionsLoaded);
 
-  const items = useFilteredSessions({ filter: "unpinned" });
+  const allItems = useFilteredSessions({ filter: "unpinned" });
+
+  // Exclude group sessions — they are rendered by GroupSessionsList
+  const items = useMemo(
+    () =>
+      allItems.filter((item) => {
+        const kind = item.kind === "memory" ? item.session.kind : item.info.kind;
+        return kind !== "group";
+      }),
+    [allItems],
+  );
 
   log("render: totalItems=%d", items.length);
 

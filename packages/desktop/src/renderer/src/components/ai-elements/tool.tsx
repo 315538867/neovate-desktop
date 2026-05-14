@@ -6,12 +6,13 @@ import type { ComponentProps, ReactNode } from "react";
 
 import { ChevronDown, CircleX } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { createContext, isValidElement, useContext, useMemo } from "react";
+import { createContext, isValidElement, useCallback, useContext, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "../../lib/utils";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { CodeBlock } from "./code-block";
+import { useConversationContext } from "./conversation";
 
 // --- Context ---
 
@@ -38,14 +39,30 @@ export type ToolProps = ComponentProps<typeof Collapsible> & {
   invocation: UIToolInvocation<UITool>;
 };
 
-export const Tool = ({ invocation, className, children, ...props }: ToolProps) => {
+export const Tool = ({ invocation, className, children, onOpenChange, ...props }: ToolProps) => {
   const contextValue = useMemo(
     () => ({ state: invocation.state, errorText: invocation.errorText }),
     [invocation.state, invocation.errorText],
   );
+  // Pre-mask the conversation pinned-state on close so the resulting height
+  // shrink doesn't trigger a scrollTop-clamp re-pin (mirrors reasoning.tsx).
+  // Required because the pinned-state hook's defense-in-depth layer is the
+  // 600ms mask after every collapse close — Tool is a load-bearing component.
+  const { notifyHeightShrink } = useConversationContext();
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) notifyHeightShrink();
+      (onOpenChange as any)?.(open);
+    },
+    [notifyHeightShrink, onOpenChange],
+  );
   return (
     <ToolContext.Provider value={contextValue}>
-      <Collapsible className={cn("not-prose w-full overflow-hidden", className)} {...props}>
+      <Collapsible
+        className={cn("not-prose w-full overflow-hidden", className)}
+        {...props}
+        onOpenChange={handleOpenChange}
+      >
         {children}
       </Collapsible>
     </ToolContext.Provider>

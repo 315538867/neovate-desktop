@@ -1,3 +1,6 @@
+/** 会话类型：单项目（现行） vs 组对话（新增） */
+export type ConversationKind = "single" | "group";
+
 export type AgentInfo = { name: string; description: string; model?: string };
 
 export type ModelInfo = {
@@ -105,6 +108,12 @@ export type SessionInfo = {
   cwd?: string;
   updatedAt: string;
   createdAt: string;
+  /** 会话类型，单项目会话默认 single */
+  kind?: ConversationKind;
+  /** 分组 id（kind === "group" 时） */
+  groupId?: string;
+  /** 组对话：已临时提升写权限的项目 id 列表（本会话有效） */
+  elevatedProjectIds?: string[];
 };
 
 /** Event emitted when a session is created or deleted */
@@ -120,4 +129,8 @@ export type ActiveSessionInfo = {
   createdAt: number;
   model?: string;
   providerId?: string;
+  kind?: ConversationKind;
+  groupId?: string;
+  /** 组对话：已临时提升写权限的项目 id 列表（本会话有效，不持久化） */
+  elevatedProjectIds?: string[];
 };

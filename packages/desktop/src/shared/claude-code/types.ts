@@ -130,6 +130,13 @@ type PermissionRequest = {
   toolName: string;
   input: Record<string, unknown>;
   options: Omit<Parameters<CanUseTool>[2], "signal">;
+  /** 可选：存在表示这是一次"可提升"的请求（path-guard 发现写到非 focus 组成员） */
+  elevation?: {
+    /** 目标项目 id（归属判定来自 path-guard） */
+    projectId: string;
+    /** 目标项目显示名（用于对话框文案） */
+    projectName: string;
+  };
 };
 
 export type ClaudeCodeUIEventRequest = PermissionRequest;
@@ -147,7 +154,12 @@ export type ClaudeCodeUIDispatch =
   | {
       kind: "respond";
       requestId: string;
-      respond: { type: "permission_request"; result: PermissionResult };
+      respond: {
+        type: "permission_request";
+        result: PermissionResult;
+        /** 可选：用户在该请求中接受了"本会话内放行某项目"的提升 */
+        elevation?: { projectId: string };
+      };
     }
   | {
       kind: "configure";
@@ -155,7 +167,9 @@ export type ClaudeCodeUIDispatch =
         | { type: "set_permission_mode"; mode: PermissionMode }
         | { type: "set_model"; model: string };
     }
-  | { kind: "interrupt" };
+  | { kind: "interrupt" }
+  | { kind: "revoke_elevation"; projectId: string }
+  | { kind: "elevate_project"; projectId: string };
 
 export type ClaudeCodeUIDispatchResult =
   | { kind: "respond"; ok: boolean }
@@ -167,7 +181,9 @@ export type ClaudeCodeUIDispatchResult =
         | { type: "set_model"; model: string };
       error?: string;
     }
-  | { kind: "interrupt"; ok: boolean };
+  | { kind: "interrupt"; ok: boolean }
+  | { kind: "revoke_elevation"; ok: boolean }
+  | { kind: "elevate_project"; ok: boolean };
 
 // ─── Re-exports (tools) ─────────────────────────────────────────────────────
 

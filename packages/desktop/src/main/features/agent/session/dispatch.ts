@@ -44,10 +44,62 @@ export async function handleDispatch(
       ]);
       return { kind: "respond", ok: false };
     }
+    // 若 dispatch 带 elevation 且结果是 allow，先把 projectId 加入 elevated 集合
+    if (dispatch.respond.elevation && dispatch.respond.result.behavior === "allow") {
+      const set = session.elevatedProjectIds ?? new Set<string>();
+      set.add(dispatch.respond.elevation.projectId);
+      session.elevatedProjectIds = set;
+      log(
+        "handleDispatch: elevation granted sessionId=%s projectId=%s total=%d",
+        sessionId,
+        dispatch.respond.elevation.projectId,
+        set.size,
+      );
+    }
     pending.resolve(dispatch.respond.result);
     session.pendingRequests.delete(dispatch.requestId);
     return { kind: "respond", ok: true };
   }
+
+  if (dispatch.kind === "revoke_elevation") {
+    const session = sessions.get(sessionId);
+    if (!session) throw new Error(`Unknown session: ${sessionId}`);
+    if (session.elevatedProjectIds?.delete(dispatch.projectId)) {
+      log(
+        "handleDispatch: elevation revoked sessionId=%s projectId=%s remaining=%d",
+        sessionId,
+        dispatch.projectId,
+        session.elevatedProjectIds.size,
+      );
+      return { kind: "revoke_elevation", ok: true };
+    }
+    return { kind: "revoke_elevation", ok: false };
+  }
+
+  if (dispatch.kind === "elevate_project") {
+    const session = sessions.get(sessionId);
+    if (!session) throw new Error(`Unknown session: ${sessionId}`);
+    if (session.kind !== "group") {
+      return { kind: "elevate_project", ok: false };
+    }
+    const member = session.groupMembers?.find(
+      (m) => m.projectId === dispatch.projectId && !m.missing,
+    );
+    if (!member) {
+      return { kind: "elevate_project", ok: false };
+    }
+    const set = session.elevatedProjectIds ?? new Set<string>();
+    set.add(dispatch.projectId);
+    session.elevatedProjectIds = set;
+    log(
+      "handleDispatch: elevation granted sessionId=%s projectId=%s total=%d",
+      sessionId,
+      dispatch.projectId,
+      set.size,
+    );
+    return { kind: "elevate_project", ok: true };
+  }
+
   const session = sessions.get(sessionId);
   if (!session) throw new Error(`Unknown session: ${sessionId}`);
 

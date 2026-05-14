@@ -47,6 +47,7 @@ import { useNewSession } from "../hooks/use-new-session";
 import { useSessionLifecycleSubscription } from "../hooks/use-session-lifecycle-subscription";
 import { BranchSwitcher } from "./branch-switcher";
 import { ContextLeft } from "./context-left";
+import { GroupFocusBar } from "./group-focus-bar";
 import { MessageInput, type SendParts } from "./message-input";
 import { MessageParts } from "./message-parts";
 import { PermissionDialog } from "./permission-dialog";
@@ -127,6 +128,12 @@ export function AgentChat() {
     if (!s.activeSessionId) return false;
     const session = s.sessions.get(s.activeSessionId);
     return session != null && !session.isNew;
+  });
+  const pendingGroupSession = useAgentStore((s) => {
+    if (!s.activeSessionId) return null;
+    const session = s.sessions.get(s.activeSessionId);
+    if (session?.kind === "group" && session.isNew) return session;
+    return null;
   });
   const sessionInitError = useAgentStore((s) => s.sessionInitError);
   const setSessionInitError = useAgentStore((s) => s.setSessionInitError);
@@ -275,6 +282,7 @@ export function AgentChat() {
   if (!hasActiveChat) {
     return (
       <div className="relative flex h-full flex-col">
+        {pendingGroupSession && <GroupFocusBar session={pendingGroupSession} />}
         <WelcomePanel hasProject />
         <MessageInput
           onSend={handleSend}
@@ -320,7 +328,8 @@ function SessionLoadingOverlay() {
 }
 
 function AgentChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }) {
-  const tasks = useAgentStore((s) => s.sessions.get(sessionId)?.tasks);
+  const session = useAgentStore((s) => s.sessions.get(sessionId));
+  const tasks = session?.tasks;
   const isLoadingOther = useAgentStore(
     (s) => s.loadingSessionId !== null && s.loadingSessionId !== sessionId,
   );
@@ -362,6 +371,7 @@ function AgentChatSession({ sessionId, cwd }: { sessionId: string; cwd: string }
 
   return (
     <div className="@container/chat flex h-full flex-col">
+      {session && <GroupFocusBar session={session} />}
       <ConversationView sessionId={sessionId} status={status} contextRef={conversationContextRef} />
       <div className="shrink-0 max-w-3xl mx-auto w-full">
         <TaskProgress tasks={tasks} />

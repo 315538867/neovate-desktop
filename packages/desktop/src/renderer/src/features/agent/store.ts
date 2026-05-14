@@ -55,6 +55,8 @@ export type SessionUsage = {
   remainingPct: number;
 };
 
+import type { ConversationKind } from "../../../../shared/features/agent/types";
+
 export type ChatSession = {
   sessionId: string;
   cwd?: string;
@@ -70,6 +72,9 @@ export type ChatSession = {
   permissionMode?: PermissionMode;
   usage?: SessionUsage;
   tasks: Map<string, TaskState>;
+  kind?: ConversationKind;
+  groupId?: string;
+  elevatedProjectIds?: string[];
 };
 
 export type RewindUndoBuffer = {
@@ -96,11 +101,25 @@ type AgentState = {
   setAgentSessions: (sessions: SessionInfo[]) => void;
   createSession: (
     sessionId: string,
-    meta?: { title?: string; createdAt?: string; cwd?: string; isNew?: boolean },
+    meta?: {
+      title?: string;
+      createdAt?: string;
+      cwd?: string;
+      isNew?: boolean;
+      kind?: ConversationKind;
+      groupId?: string;
+    },
   ) => void;
   createBackgroundSession: (
     sessionId: string,
-    meta?: { title?: string; createdAt?: string; cwd?: string; isNew?: boolean },
+    meta?: {
+      title?: string;
+      createdAt?: string;
+      cwd?: string;
+      isNew?: boolean;
+      kind?: ConversationKind;
+      groupId?: string;
+    },
   ) => void;
   removeSession: (sessionId: string) => void;
   addUserMessage: (sessionId: string, content: string) => void;
@@ -109,6 +128,8 @@ type AgentState = {
   setCurrentModel: (sessionId: string, model: string) => void;
   setModelScope: (sessionId: string, scope: ModelScope | undefined) => void;
   setProviderId: (sessionId: string, providerId: string | undefined) => void;
+  addElevatedProject: (sessionId: string, projectId: string) => Promise<void>;
+  revokeElevation: (sessionId: string, projectId: string) => Promise<void>;
   setPermissionMode: (sessionId: string, mode: PermissionMode) => void;
   setSessionUsage: (
     sessionId: string,
@@ -205,6 +226,8 @@ export const useAgentStore = create<AgentState>()(
           availableCommands: [],
           availableModels: [],
           tasks: new Map(),
+          kind: meta?.kind,
+          groupId: meta?.groupId,
         });
         state.activeSessionId = sessionId;
         state._sessionsMetaVersion += 1;
@@ -225,6 +248,8 @@ export const useAgentStore = create<AgentState>()(
           availableCommands: [],
           availableModels: [],
           tasks: new Map(),
+          kind: meta?.kind,
+          groupId: meta?.groupId,
         });
         state._sessionsMetaVersion += 1;
         storeLog("createBackgroundSession: totalSessions=%d (not activated)", state.sessions.size);
@@ -367,6 +392,55 @@ export const useAgentStore = create<AgentState>()(
           state._sessionsMetaVersion += 1;
         }
       });
+    },
+
+    addElevatedProject: async (sessionId, projectId) => {
+      storeLog("addElevatedProject: sid=%s projectId=%s", sessionId, projectId);
+      // Optimistic update
+      set((state) => {
+        const session = state.sessions.get(sessionId);
+        if (session) {
+          if (!session.elevatedProjectIds) {
+            session.elevatedProjectIds = [];
+          }
+          if (!session.elevatedProjectIds.includes(projectId)) {
+            session.elevatedProjectIds.push(projectId);
+          }
+          state._sessionsMetaVersion += 1;
+        }
+      });
+      // Call main process
+      const res = await client.agent.session.claudeCode.dispatch({
+        sessionId,
+        dispatch: { kind: "elevate_project", projectId },
+      });
+      if (res.kind !== "elevate_project" || !res.ok) {
+        // Revert on failure
+        set((state) => {
+          const session = state.sessions.get(sessionId);
+          if (session?.elevatedProjectIds) {
+            session.elevatedProjectIds = session.elevatedProjectIds.filter((p) => p !== projectId);
+            state._sessionsMetaVersion += 1;
+          }
+        });
+      }
+    },
+
+    revokeElevation: async (sessionId, projectId) => {
+      storeLog("revokeElevation: sid=%s projectId=%s", sessionId, projectId);
+      const res = await client.agent.session.claudeCode.dispatch({
+        sessionId,
+        dispatch: { kind: "revoke_elevation", projectId },
+      });
+      if (res.kind === "revoke_elevation" && res.ok) {
+        set((state) => {
+          const session = state.sessions.get(sessionId);
+          if (session?.elevatedProjectIds) {
+            session.elevatedProjectIds = session.elevatedProjectIds.filter((p) => p !== projectId);
+            state._sessionsMetaVersion += 1;
+          }
+        });
+      }
     },
 
     setPermissionMode: (sessionId, mode) => {

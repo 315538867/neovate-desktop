@@ -4,6 +4,8 @@ import { mkdirSync } from "node:fs";
 
 import type {
   Project,
+  ProjectGroup,
+  ProjectGroupMember,
   ProjectStore as ProjectStoreSchema,
 } from "../../../shared/features/project/types";
 import type { ProjectProviderConfig } from "../../../shared/features/provider/types";
@@ -30,9 +32,34 @@ export class ProjectStore {
         sessionStartTimes: {},
         crashCount: 0,
         lastCrashTs: 0,
+        groups: [],
       },
       serialize: (value) => JSON.stringify(value, null, 2) + "\n",
     });
+
+    this.migrateGroupRolesToFreeText();
+  }
+
+  /**
+   * One-time migration: legacy enum role values (`library`/`consumer`/...)
+   * are reset to `undefined` so that the new free-text role field starts
+   * clean. Marked done by `groupsRoleMigrationVersion === "v1"` to avoid
+   * clobbering subsequent user-entered text.
+   */
+  private migrateGroupRolesToFreeText(): void {
+    if (this.store.get("groupsRoleMigrationVersion") === "v1") return;
+    const groups = this.store.get("groups") ?? [];
+    if (groups.length > 0) {
+      log("migrating legacy enum roles to free-text (reset to undefined)", {
+        groupCount: groups.length,
+      });
+      const migrated = groups.map((g) => ({
+        ...g,
+        members: g.members.map((m) => ({ projectId: m.projectId, role: undefined })),
+      }));
+      this.store.set("groups", migrated);
+    }
+    this.store.set("groupsRoleMigrationVersion", "v1");
   }
 
   getAll(): Project[] {
@@ -205,6 +232,112 @@ export class ProjectStore {
 
   getPlayground(): Project | undefined {
     return this.get(PLAYGROUND_PROJECT_ID);
+  }
+
+  // ── 分组 ──────────────────────────────────────────────
+
+  getGroups(): ProjectGroup[] {
+    return this.store.get("groups");
+  }
+
+  getGroup(id: string): ProjectGroup | undefined {
+    return this.getGroups().find((g) => g.id === id);
+  }
+
+  addGroup(group: ProjectGroup): void {
+    log("addGroup", { id: group.id, name: group.name });
+    const groups = this.getGroups();
+    groups.push(group);
+    this.store.set("groups", groups);
+  }
+
+  updateGroup(id: string, updates: Partial<Pick<ProjectGroup, "name" | "members">>): void {
+    log("updateGroup", { id });
+    const groups = this.getGroups().map((g) =>
+      g.id === id ? { ...g, ...updates, lastUpdatedAt: new Date().toISOString() } : g,
+    );
+    this.store.set("groups", groups);
+  }
+
+  removeGroup(id: string): void {
+    log("removeGroup", { id });
+    const groups = this.getGroups().filter((g) => g.id !== id);
+    this.store.set("groups", groups);
+  }
+
+  reorderGroups(groupIds: string[]): void {
+    log("reorderGroups", { groupIds });
+    const groups = this.getGroups();
+    const map = new Map(groups.map((g) => [g.id, g]));
+    const reordered = groupIds.flatMap((id) => {
+      const g = map.get(id);
+      return g ? [g] : [];
+    });
+    this.store.set("groups", reordered);
+  }
+
+  addGroupMember(groupId: string, member: ProjectGroupMember): void {
+    const groups = this.getGroups().map((g) => {
+      if (g.id !== groupId) return g;
+      if (g.members.some((m) => m.projectId === member.projectId)) return g;
+      return {
+        ...g,
+        members: [...g.members, member],
+        lastUpdatedAt: new Date().toISOString(),
+      };
+    });
+    this.store.set("groups", groups);
+  }
+
+  updateGroupMemberRole(
+    groupId: string,
+    projectId: string,
+    role: ProjectGroupMember["role"],
+  ): void {
+    const groups = this.getGroups().map((g) => {
+      if (g.id !== groupId) return g;
+      return {
+        ...g,
+        members: g.members.map((m) => (m.projectId === projectId ? { ...m, role } : m)),
+        lastUpdatedAt: new Date().toISOString(),
+      };
+    });
+    this.store.set("groups", groups);
+  }
+
+  removeGroupMember(groupId: string, projectId: string): void {
+    const groups = this.getGroups().map((g) => {
+      if (g.id !== groupId) return g;
+      return {
+        ...g,
+        members: g.members.filter((m) => m.projectId !== projectId),
+        lastUpdatedAt: new Date().toISOString(),
+      };
+    });
+    this.store.set("groups", groups);
+  }
+
+  reorderGroupMembers(groupId: string, memberProjectIds: string[]): void {
+    const groups = this.getGroups().map((g) => {
+      if (g.id !== groupId) return g;
+      const map = new Map(g.members.map((m) => [m.projectId, m]));
+      const reordered = memberProjectIds.flatMap((pid) => {
+        const m = map.get(pid);
+        return m ? [m] : [];
+      });
+      return { ...g, members: reordered, lastUpdatedAt: new Date().toISOString() };
+    });
+    this.store.set("groups", groups);
+  }
+
+  /**
+   * Find all groups that reference the given project id.
+   * Used by projects.delete to provide a soft hint in the UI.
+   */
+  findGroupsByProject(projectId: string): { groupId: string; groupName: string }[] {
+    return this.getGroups()
+      .filter((g) => g.members.some((m) => m.projectId === projectId))
+      .map((g) => ({ groupId: g.id, groupName: g.name }));
   }
 
   /**

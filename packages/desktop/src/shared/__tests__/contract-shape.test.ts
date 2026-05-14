@@ -87,11 +87,11 @@ describe("contract shape (Wave 3.1)", () => {
     expect(Object.keys(orchestratorContract).sort()).toEqual([...expected].sort());
   });
 
-  it("session contract surface is exactly the legacy 23-leaf count", () => {
+  it("session contract surface is exactly the legacy 23+1-leaf count", () => {
     const top = Object.keys(sessionContract).length;
     const claudeCodeLeaves = Object.keys(sessionContract.claudeCode).length;
     const networkLeaves = Object.keys(sessionContract.network).length;
-    // 12 top-level (incl. `claudeCode` + `network` group entries) + 6 + 5 = 23
+    // 14 top-level + 6 (claudeCode) + 5 (network) - 2 (group keys counted twice) = 23
     expect(top + claudeCodeLeaves + networkLeaves - /* group keys counted twice */ 2).toBe(23);
   });
 });

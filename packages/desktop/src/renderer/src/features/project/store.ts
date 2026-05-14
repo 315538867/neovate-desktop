@@ -4,7 +4,7 @@ import { immer } from "zustand/middleware/immer";
 
 const log = debug("neovate:project");
 
-import type { Project, ProjectInfo } from "../../../../shared/features/project/types";
+import type { Project, ProjectGroup, ProjectInfo } from "../../../../shared/features/project/types";
 
 import { withReport } from "../../core/error-reporter";
 import { client } from "../../orpc";
@@ -169,6 +169,37 @@ export const useProjectStore = create<ProjectState>()(
         state.pinnedSessions = pinned;
         state.closedProjectAccordions = closedAccordions;
       });
+    },
+  })),
+);
+
+// ── 分组 Store ──────────────────────────────────────────────
+
+type GroupsState = {
+  groups: ProjectGroup[];
+  loading: boolean;
+
+  setGroups: (groups: ProjectGroup[]) => void;
+  setLoading: (loading: boolean) => void;
+  loadGroups: () => Promise<void>;
+};
+
+export const useGroupsStore = create<GroupsState>()(
+  immer((set) => ({
+    groups: [],
+    loading: false,
+
+    setGroups: (groups) => set({ groups }),
+    setLoading: (loading) => set({ loading }),
+
+    loadGroups: async () => {
+      set({ loading: true });
+      try {
+        const groups = await client.project.groups.list();
+        set({ groups });
+      } finally {
+        set({ loading: false });
+      }
     },
   })),
 );

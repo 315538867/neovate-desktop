@@ -19,9 +19,11 @@ import type {
 } from "../../../shared/features/agent/types";
 import type { Contributions } from "../../core/plugin/contributions";
 import type { ConfigStore } from "../config/config-store";
+import type { GroupService } from "../project/group-service";
 import type { ProjectStore } from "../project/project-store";
 import type { RequestTracker } from "./request-tracker";
 import type { SessionEntry } from "./session/types";
+import type { GroupMemberSnapshot } from "./session/types";
 
 import { PowerBlockerService } from "../../core/power-blocker-service";
 import { closeSession as closeSessionFn, type CloseContext } from "./session/close";
@@ -33,6 +35,7 @@ import {
 import { handleDispatch as handleDispatchFn, type DispatchContext } from "./session/dispatch";
 import {
   createSession as createSessionFn,
+  type CreateSessionParams,
   type FacadeContext,
   loadSession as loadSessionFn,
 } from "./session/facade";
@@ -41,6 +44,7 @@ import {
   forkSession as forkSessionFn,
   rewindToMessage as rewindToMessageFn,
 } from "./session/fork";
+import { buildQueryOptions } from "./session/init";
 import {
   lastTurnDiff as lastTurnDiffFn,
   lastTurnFiles as lastTurnFilesFn,
@@ -69,6 +73,16 @@ export class SessionManager {
   private emittedCreatedSessions = new Set<string>();
   private closingSessions = new Set<string>();
 
+  /** Group metadata captured from sessions before they are closed (for archive). */
+  private pendingArchiveMeta = new Map<
+    string,
+    {
+      kind?: string;
+      groupId?: string;
+      groupMembers?: GroupMemberSnapshot[];
+    }
+  >();
+
   // Bundles of manager-owned state passed to session helpers.
   // Built once in constructor; closures hold `this` so callbacks always
   // dispatch to the live manager instance. `initContext` is intentionally
@@ -85,6 +99,7 @@ export class SessionManager {
     private projectStore: ProjectStore,
     private requestTracker: RequestTracker,
     private powerBlocker: PowerBlockerService,
+    private groupService: GroupService,
     private getAgentContributions: () => Contributions["agents"] = () => [],
   ) {
     const deps: SessionContextsDeps = {
@@ -93,16 +108,18 @@ export class SessionManager {
       closingSessions: this.closingSessions,
       configStore: this.configStore,
       projectStore: this.projectStore,
+      groupService: this.groupService,
       requestTracker: this.requestTracker,
       powerBlocker: this.powerBlocker,
       eventPublisher: this.eventPublisher,
       getAgentContributions: () => this.getAgentContributions(),
       closeSession: (id) => this.closeSession(id),
-      createSession: (cwd) => this.createSession(cwd),
+      createSession: (cwd) => this.createSession({ cwd }),
       emitLifecycle: (event) => this.emitLifecycle(event),
       startConsume: (id) => {
         this.consume(id).catch((err) => log("consume error for %s: %o", id, err));
       },
+      restartConsume: (id) => this.restartConsume(id),
       log,
       rtkLog,
     };
@@ -139,15 +156,64 @@ export class SessionManager {
       createdAt: session.createdAt,
       model: session.model,
       providerId: session.providerId,
+      kind: session.kind,
+      groupId: session.groupId,
+      elevatedProjectIds: session.elevatedProjectIds ? [...session.elevatedProjectIds] : undefined,
     }));
   }
 
+  /**
+   * Return active sessions belonging to a given group.
+   */
+  listActiveByGroup(groupId: string): { sessionId: string; title?: string }[] {
+    const results: { sessionId: string; title?: string }[] = [];
+    for (const [sessionId, session] of this.sessions) {
+      if (session.kind === "group" && session.groupId === groupId) {
+        results.push({ sessionId });
+      }
+    }
+    return results;
+  }
+
+  /**
+   * Return active sessions where a given project is the focus or a member.
+   */
+  listSessionsByMember(projectId: string): { sessionId: string; groupId: string }[] {
+    const results: { sessionId: string; groupId: string }[] = [];
+    for (const [sessionId, session] of this.sessions) {
+      if (session.kind === "group" && session.groupId) {
+        if (session.groupMembers?.some((m) => m.projectId === projectId)) {
+          results.push({ sessionId, groupId: session.groupId });
+        }
+      }
+    }
+    return results;
+  }
+
+  /**
+   * Called when a group's definition changes (members added/removed, roles
+   * updated, group renamed). Refreshes the groupMembers snapshot on every
+   * active session for that group and enqueues a hint so the AI learns
+   * about the change on the next user message.
+   */
+  onGroupChanged(groupId: string): void {
+    const group = this.groupService.getGroup(groupId);
+    if (!group) return;
+
+    const expanded = this.groupService.expandMembers(group);
+
+    for (const [sessionId, session] of this.sessions) {
+      if (session.kind === "group" && session.groupId === groupId) {
+        session.groupMembers = expanded;
+
+        session.pendingHint = `分组成员已更新：${expanded.map((m) => `${m.name} (${m.role})`).join("、")}。`;
+        log("onGroupChanged: refreshed snapshot for sessionId=%s", sessionId);
+      }
+    }
+  }
+
   /** Start a new session. */
-  async createSession(
-    cwd: string,
-    model?: string,
-    explicitProviderId?: string | null,
-  ): Promise<
+  async createSession(params: CreateSessionParams): Promise<
     {
       sessionId: string;
       currentModel?: string;
@@ -155,7 +221,7 @@ export class SessionManager {
       providerId?: string;
     } & Awaited<ReturnType<Query["initializationResult"]>>
   > {
-    return createSessionFn(this.facadeContext, cwd, model, explicitProviderId);
+    return createSessionFn(this.facadeContext, params);
   }
 
   /** Resume an existing session, returning converted historical messages. */
@@ -243,6 +309,15 @@ export class SessionManager {
     restoreFiles: boolean,
     title?: string,
   ): Promise<RewindResult> {
+    // Capture group metadata before the session is closed by rewindToMessageFn
+    const session = this.sessions.get(sessionId);
+    if (session?.kind === "group") {
+      this.pendingArchiveMeta.set(sessionId, {
+        kind: session.kind,
+        groupId: session.groupId,
+        groupMembers: session.groupMembers,
+      });
+    }
     return rewindToMessageFn(this.forkContext, sessionId, messageId, restoreFiles, title);
   }
 
@@ -283,7 +358,11 @@ export class SessionManager {
       cwd?: string;
     },
   ): Promise<void> {
-    await archiveSessionFiles(sessionId, meta, log);
+    const pending = this.pendingArchiveMeta.get(sessionId);
+    if (pending) {
+      this.pendingArchiveMeta.delete(sessionId);
+    }
+    await archiveSessionFiles(sessionId, { ...meta, ...pending }, log);
   }
 
   /**
@@ -292,6 +371,49 @@ export class SessionManager {
    */
   async send(sessionId: string, message: ClaudeCodeUIMessage): Promise<void> {
     return sendUserMessage(this.sendContext, sessionId, message);
+  }
+
+  /**
+   * Restart a session's consume loop when it has exited (e.g. SDK stream error).
+   * Creates a new SDK Query with `resume` to reconnect to the same session,
+   * preserving all conversation history. Uses the existing input Pushable so
+   * no messages are lost.
+   */
+  private async restartConsume(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session || !session.consumeExited) return;
+
+    const { cwd, model, kind, groupMembers } = session;
+
+    // Build fresh query options (canUseTool, permissions, etc.)
+    const queryOpts = buildQueryOptions(this.facadeContext.initContext, {
+      sessionId,
+      cwd,
+      model,
+      kind,
+      groupMembers,
+    });
+
+    log("restartConsume: creating new query sessionId=%s", sessionId);
+
+    // Create new Query with resume — reuse existing input Pushable
+    const { query: queryFn } = await import("@anthropic-ai/claude-agent-sdk");
+    const q = queryFn({
+      prompt: session.input,
+      options: { ...queryOpts, resume: sessionId },
+    });
+
+    log("restartConsume: awaiting initializationResult sessionId=%s", sessionId);
+    await q.initializationResult();
+    log("restartConsume: DONE sessionId=%s", sessionId);
+
+    // Only update state after initialization succeeds — if it throws, the
+    // session stays in consumeExited state so the next send retries recovery.
+    session.query = q;
+    session.consumeExited = false;
+
+    // Fire-and-forget the new consume loop
+    this.consume(sessionId).catch((err) => log("restart consume error for %s: %o", sessionId, err));
   }
 
   /**

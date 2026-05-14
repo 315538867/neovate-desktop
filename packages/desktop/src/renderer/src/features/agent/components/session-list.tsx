@@ -1,4 +1,5 @@
 import debug from "debug";
+import { MessageCircle } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
@@ -14,6 +15,7 @@ import { isSessionInProject } from "../session-utils";
 import { useAgentStore } from "../store";
 import { ChronologicalList } from "./chronological-list";
 import { EmptySessionState } from "./empty-session-state";
+import { GroupSessionsList, GroupSessionsSection } from "./group-sessions-section";
 import { PanelTriggerGroup } from "./panel-trigger-buttons";
 import { PinnedSessionList } from "./pinned-session-list";
 import { ProjectAccordionList } from "./project-accordion-list";
@@ -58,6 +60,7 @@ function MultiProjectSessionList() {
       {/* Scrollable session list area */}
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <PinnedSessionList />
+        <GroupSessionsList />
         <SidebarTitleBar />
         {sidebarOrganize === "chronological" ? <ChronologicalList /> : <ProjectAccordionList />}
       </div>
@@ -112,8 +115,14 @@ const SingleProjectSessionList = memo(function SingleProjectSessionList() {
     [setActiveSession],
   ) as (sessionId: string, projectPath?: string) => void;
 
-  const { pinnedItems, regularItems, pinned } = useMemo(() => {
-    if (!projectPath) return { pinnedItems: [], regularItems: [], pinned: new Set<string>() };
+  const { pinnedItems, regularItems, singleItems, pinned } = useMemo(() => {
+    if (!projectPath)
+      return {
+        pinnedItems: [],
+        regularItems: [],
+        singleItems: [],
+        pinned: new Set<string>(),
+      };
 
     const archived = new Set(archivedSessions[projectPath] ?? []);
     const pinnedSet = new Set(pinnedSessions[projectPath] ?? []);
@@ -147,15 +156,21 @@ const SingleProjectSessionList = memo(function SingleProjectSessionList() {
       });
     };
 
+    const isGroup = (item: UnifiedItem) =>
+      item.kind === "memory" ? item.session.kind === "group" : item.info.kind === "group";
+
+    const allRegular = toUnified(
+      allInMemory.filter((s) => !pinnedSet.has(s.sessionId)),
+      allPersisted.filter((s) => !pinnedSet.has(s.sessionId)),
+    );
+
     return {
       pinnedItems: toUnified(
         allInMemory.filter((s) => pinnedSet.has(s.sessionId)),
         allPersisted.filter((s) => pinnedSet.has(s.sessionId)),
       ),
-      regularItems: toUnified(
-        allInMemory.filter((s) => !pinnedSet.has(s.sessionId)),
-        allPersisted.filter((s) => !pinnedSet.has(s.sessionId)),
-      ),
+      regularItems: allRegular,
+      singleItems: allRegular.filter((item) => !isGroup(item)),
       pinned: pinnedSet,
     };
   }, [sessionsArray, agentSessions, archivedSessions, pinnedSessions, projectPath]);
@@ -200,7 +215,23 @@ const SingleProjectSessionList = memo(function SingleProjectSessionList() {
                 })}
               </>
             )}
-            {regularItems.map((item) => {
+            <GroupSessionsSection
+              items={regularItems}
+              pinnedIds={pinned}
+              activeSessionId={activeSessionId}
+              restoring={restoring}
+              onActivate={handleActivate}
+              onLoad={handleLoad}
+            />
+            {singleItems.length > 0 && (
+              <li className="flex items-center gap-1.5 px-3 pt-2 pb-1">
+                <MessageCircle size={11} strokeWidth={1.5} className="text-muted-foreground/50" />
+                <span className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider">
+                  {t("session.projectSessions", "项目会话")}
+                </span>
+              </li>
+            )}
+            {singleItems.map((item) => {
               const id = item.kind === "memory" ? item.session.sessionId : item.info.sessionId;
               return (
                 <UnifiedSessionItem

@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { toastManager } from "../../../components/ui/toast";
 import { client } from "../../../orpc";
-import { useProjectStore } from "../store";
+import { useGroupsStore, useProjectStore } from "../store";
 
 const log = debug("neovate:project");
 
@@ -29,6 +29,7 @@ export function useProject() {
 
   useEffect(() => {
     void fetchProjects();
+    void useGroupsStore.getState().loadGroups();
   }, [fetchProjects]);
 
   const openProject = useCallback(async () => {
@@ -57,8 +58,28 @@ export function useProject() {
   );
 
   const removeProject = useCallback(
-    async (id: string) => {
+    async (
+      id: string,
+    ): Promise<{ blockedBy: { groupId: string; groupName: string }[] } | undefined> => {
       log("remove project", { id });
+      // Pre-check: warn if project is referenced by any groups (does NOT block).
+      const groups = useGroupsStore.getState().groups;
+      const blockedBy = groups
+        .filter((g) => g.members.some((m) => m.projectId === id))
+        .map((g) => ({ groupId: g.id, groupName: g.name }));
+      if (blockedBy.length > 0) {
+        return { blockedBy };
+      }
+      await client.project.remove({ id });
+      await fetchProjects();
+      return undefined;
+    },
+    [fetchProjects],
+  );
+
+  const forceRemoveProject = useCallback(
+    async (id: string) => {
+      log("force remove project", { id });
       await client.project.remove({ id });
       await fetchProjects();
     },
@@ -97,6 +118,7 @@ export function useProject() {
     openProject,
     createProject,
     removeProject,
+    forceRemoveProject,
     switchProject,
   };
 }

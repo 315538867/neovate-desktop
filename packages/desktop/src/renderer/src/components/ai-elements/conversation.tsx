@@ -40,9 +40,13 @@ type ConversationCtxValue = {
   isPinnedRef: RefObject<boolean>;
   /**
    * Tell the conversation a programmatic height shrink is about to happen.
-   * Within ~350ms the underlying pinned-state will ignore `scrollend` events
+   * Within ~600ms the underlying pinned-state will ignore `scrollend` events
    * from the resulting browser scrollTop-clamp, preventing the user from
    * being yanked back to bottom by the shrink itself.
+   *
+   * IMPORTANT: every collapse-close path (Reasoning, Tool, ChainOfThought,
+   * AssistantMessage Summary) MUST call this before triggering the height
+   * change — the mask is the sole defense against scrollTop-clamp re-pin.
    */
   notifyHeightShrink: () => void;
 };
@@ -112,6 +116,33 @@ export const Conversation = forwardRef<HTMLDivElement, ConversationProps>(
       [scrollToBottom],
     );
 
+    // Entry scroll: explicit, run-once-per-instance scroll to the last item
+    // when items first become non-empty. Replaces the previous reliance on
+    // Virtuoso's `initialTopMostItemIndex` (which used numeric form with
+    // default `align: 'start'` — last item top aligned to viewport top, NOT
+    // bottom). Because <AgentChatSession key={activeSessionId}> remounts on
+    // every session switch, Conversation is a fresh instance each time and
+    // didEntryScrollRef starts false → we always run once per session entry.
+    const didEntryScrollRef = useRef(false);
+    useEffect(() => {
+      if (didEntryScrollRef.current) return;
+      if (items.length === 0) return;
+      didEntryScrollRef.current = true;
+      // Open follow intent so streaming after entry continues to follow.
+      pinToBottom();
+      // Wait one frame so Virtuoso completes its first measurement pass
+      // before we command the scroll. Without rAF the scrollToIndex call
+      // races the layout and can land short of the bottom.
+      const last = items.length - 1;
+      requestAnimationFrame(() => {
+        handle.current?.scrollToIndex({
+          index: last,
+          align: "end",
+          behavior: "auto",
+        });
+      });
+    }, [items.length, pinToBottom]);
+
     // followOutput is a function so Virtuoso re-evaluates it per items change.
     // Returning "auto" (instant) avoids stacking smooth animations against the
     // estimate→measure→correct cycle that produces visible flicker. Reading
@@ -171,7 +202,6 @@ export const Conversation = forwardRef<HTMLDivElement, ConversationProps>(
             atBottomStateChange={onAtBottomStateChange}
             atBottomThreshold={AT_BOTTOM_THRESHOLD}
             increaseViewportBy={200}
-            initialTopMostItemIndex={items.length > 0 ? items.length - 1 : 0}
             components={{
               Header: () => <div className="h-3" />,
               Footer: () => <div className="h-3" />,

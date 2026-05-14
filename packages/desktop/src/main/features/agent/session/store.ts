@@ -14,13 +14,40 @@
 
 import type { SDKSessionInfo } from "@anthropic-ai/claude-agent-sdk";
 
-import { appendFile, copyFile, mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  copyFile,
+  mkdir,
+  readdir,
+  readFile,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
-import type { SessionInfo } from "../../../../shared/features/agent/types";
+import type { ConversationKind, SessionInfo } from "../../../../shared/features/agent/types";
 
 import { APP_DATA_DIR } from "../../../core/app-paths";
+
+// ---------------------------------------------------------------------------
+// Session metadata — independent from SDK .jsonl files
+// ---------------------------------------------------------------------------
+
+const META_DIR = path.join(APP_DATA_DIR, "session-metas");
+
+function getMetaPath(sessionId: string): string {
+  return path.join(META_DIR, `${sessionId}.json`);
+}
+
+async function ensureMetaDir(): Promise<void> {
+  await mkdir(META_DIR, { recursive: true });
+}
+
+// ---------------------------------------------------------------------------
+// SDK .jsonl file operations
+// ---------------------------------------------------------------------------
 
 /**
  * List `.jsonl` files one level deep under `~/.claude/projects/`.
@@ -80,20 +107,186 @@ export async function buildBirthtimeMap(): Promise<Map<string, Date>> {
 }
 
 /**
+ * Group metadata persisted alongside session transcripts in `.jsonl` files.
+ * Mirrors the subset of SessionEntry that must survive restarts.
+ */
+export type SessionMeta = {
+  kind?: ConversationKind;
+  groupId?: string;
+};
+
+/**
+ * Persist group metadata for a session.
+ *
+ * Metadata is stored in `~/.neovate-desktop/session-metas/{sessionId}.json`
+ * — independent from the SDK-managed `.jsonl` transcript file. This
+ * eliminates the race condition where `appendSessionMeta` could fire
+ * before the SDK had flushed its `.jsonl` to disk.
+ */
+export async function appendSessionMeta(sessionId: string, meta: SessionMeta): Promise<void> {
+  await ensureMetaDir();
+  await writeFile(getMetaPath(sessionId), JSON.stringify(meta, null, 2));
+}
+
+/**
+ * Read group metadata for a single session.
+ *
+ * Checks the independent metadata file first
+ * (`~/.neovate-desktop/session-metas/{sessionId}.json`). If not found,
+ * falls back to scanning the SDK `.jsonl` for a `session-meta` line
+ * (compatibility with sessions created before the independent storage
+ * migration). On a successful fallback read, the metadata is migrated
+ * to the new location automatically.
+ */
+export async function readSessionMeta(sessionId: string): Promise<SessionMeta | undefined> {
+  // 1. Try independent storage (post-migration)
+  const metaPath = getMetaPath(sessionId);
+  try {
+    const raw = await readFile(metaPath, "utf-8");
+    return JSON.parse(raw) as SessionMeta;
+  } catch {
+    // file not found or unreadable — fall through to legacy path
+  }
+
+  // 2. Fallback: scan SDK .jsonl (compatibility with pre-migration sessions)
+  const matches = await listSessionFiles(`${sessionId}.jsonl`);
+  if (matches.length === 0) return undefined;
+
+  try {
+    const content = await readFile(matches[0], "utf-8");
+    const lines = content.split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed.type === "session-meta") {
+          const meta: SessionMeta = {
+            kind: parsed.kind,
+            groupId: parsed.groupId,
+          };
+          // Silent migration: persist to new location for future reads
+          ensureMetaDir()
+            .then(() => writeFile(metaPath, JSON.stringify(meta, null, 2)))
+            // noop: migration is best-effort; next readSessionMeta will retry
+            .catch(() => {});
+          return meta;
+        }
+      } catch {
+        // skip non-JSON or malformed lines
+      }
+    }
+  } catch {
+    // file vanished or unreadable
+  }
+
+  return undefined;
+}
+
+/**
+ * Batch-read group metadata for all known sessions.
+ *
+ * Reads from the independent `session-metas/` directory first, then
+ * falls back to scanning legacy SDK `.jsonl` files for any sessions
+ * not already covered. Legacy records are silently migrated to the
+ * new location on discovery.
+ */
+export async function readAllSessionMetas(): Promise<Map<string, SessionMeta>> {
+  const metaMap = new Map<string, SessionMeta>();
+
+  // 1. Read all metadata from independent storage
+  try {
+    const entries = await readdir(META_DIR, { withFileTypes: true });
+    const files = entries.filter((e) => e.isFile() && e.name.endsWith(".json"));
+    const results = await Promise.all(
+      files.map(async (file) => {
+        try {
+          const id = path.basename(file.name, ".json");
+          const raw = await readFile(path.join(META_DIR, file.name), "utf-8");
+          return [id, JSON.parse(raw) as SessionMeta] as const;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    for (const entry of results) {
+      if (entry) metaMap.set(entry[0], entry[1]);
+    }
+  } catch {
+    // directory doesn't exist yet (no sessions created since migration)
+  }
+
+  // 2. Fallback: scan legacy .jsonl for sessions not yet migrated
+  const sessionFiles = await listSessionFiles();
+  const legacyResults = await Promise.all(
+    sessionFiles
+      .filter((file) => {
+        const id = path.basename(file, ".jsonl");
+        return !metaMap.has(id); // skip already-covered sessions
+      })
+      .map(async (file) => {
+        try {
+          const id = path.basename(file, ".jsonl");
+          const content = await readFile(file, "utf-8");
+          const lines = content.split("\n");
+          for (let i = lines.length - 1; i >= 0; i--) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            try {
+              const parsed = JSON.parse(line);
+              if (parsed.type === "session-meta") {
+                const meta: SessionMeta = {
+                  kind: parsed.kind,
+                  groupId: parsed.groupId,
+                };
+                // Silent migration
+                ensureMetaDir()
+                  .then(() => writeFile(getMetaPath(id), JSON.stringify(meta, null, 2)))
+                  // noop: migration is best-effort
+                  .catch(() => {});
+                return [id, meta] as const;
+              }
+            } catch {
+              // skip
+            }
+          }
+          return null;
+        } catch {
+          return null;
+        }
+      }),
+  );
+
+  for (const entry of legacyResults) {
+    if (entry) metaMap.set(entry[0], entry[1]);
+  }
+
+  return metaMap;
+}
+
+/**
  * Project SDK session info onto our wire-shape `SessionInfo`, picking the
  * best available title and the more accurate disk birthtime when present.
+ * When `metaMap` is provided, group metadata (kind/groupId)
+ * is overlaid onto the result.
  */
 export function projectSessionInfo(
   sessions: SDKSessionInfo[],
   birthtimeMap: Map<string, Date>,
+  metaMap?: Map<string, SessionMeta>,
 ): SessionInfo[] {
-  return sessions.map((s) => ({
-    sessionId: s.sessionId,
-    title: s.customTitle ?? s.summary ?? s.firstPrompt?.slice(0, 50) ?? "New Session",
-    cwd: s.cwd,
-    updatedAt: new Date(s.lastModified).toISOString(),
-    createdAt: (birthtimeMap.get(s.sessionId) ?? new Date(s.lastModified)).toISOString(),
-  }));
+  return sessions.map((s) => {
+    const meta = metaMap?.get(s.sessionId);
+    return {
+      sessionId: s.sessionId,
+      title: s.customTitle ?? s.summary ?? s.firstPrompt?.slice(0, 50) ?? "New Session",
+      cwd: s.cwd,
+      updatedAt: new Date(s.lastModified).toISOString(),
+      createdAt: (birthtimeMap.get(s.sessionId) ?? new Date(s.lastModified)).toISOString(),
+      kind: meta?.kind,
+      groupId: meta?.groupId,
+    };
+  });
 }
 
 /**
@@ -114,9 +307,9 @@ export async function listAllSessions(
   const sessions = await sdkListSessions(cwd ? { dir: cwd } : undefined);
 
   // Build sessionId -> file birthtime map for accurate createdAt
-  const birthtimeMap = await buildBirthtimeMap();
+  const [birthtimeMap, metaMap] = await Promise.all([buildBirthtimeMap(), readAllSessionMetas()]);
 
-  const result = projectSessionInfo(sessions, birthtimeMap);
+  const result = projectSessionInfo(sessions, birthtimeMap, metaMap);
 
   log("listSessions: DONE in %dms count=%d", Math.round(performance.now() - t0), result.length);
   return result;
@@ -139,10 +332,11 @@ export async function appendCustomTitle(sessionId: string, title: string): Promi
 }
 
 /**
- * Delete a session's `.jsonl` file(s) from disk. No-op (logged) if no
- * file is found. Errors are swallowed per-file so one failure does not
- * abort the rest — the caller is responsible for any side effects
- * (e.g. emitting a `deleted` lifecycle event).
+ * Delete a session's `.jsonl` file(s) and metadata file from disk.
+ * No-op (logged) if no `.jsonl` file is found. Errors are swallowed
+ * per-file so one failure does not abort the rest — the caller is
+ * responsible for any side effects (e.g. emitting a `deleted`
+ * lifecycle event).
  */
 export async function deleteSessionFiles(
   sessionId: string,
@@ -151,26 +345,34 @@ export async function deleteSessionFiles(
   const matches = await listSessionFiles(`${sessionId}.jsonl`);
   if (matches.length === 0) {
     log("deleteSessionFiles: no file found for sessionId=%s", sessionId);
-    return;
-  }
-  for (const file of matches) {
-    try {
-      await unlink(file);
-      log("deleteSessionFiles: deleted %s", file);
-    } catch (error) {
-      log(
-        "deleteSessionFiles: failed to delete %s error=%s",
-        file,
-        error instanceof Error ? error.message : error,
-      );
+  } else {
+    for (const file of matches) {
+      try {
+        await unlink(file);
+        log("deleteSessionFiles: deleted %s", file);
+      } catch (error) {
+        log(
+          "deleteSessionFiles: failed to delete %s error=%s",
+          file,
+          error instanceof Error ? error.message : error,
+        );
+      }
     }
+  }
+
+  // Also clean up independent metadata file
+  const metaPath = getMetaPath(sessionId);
+  try {
+    await unlink(metaPath);
+  } catch {
+    // noop: metadata file may not exist (legacy session or already cleaned)
   }
 }
 
 /**
- * Atomically back up a session's `.jsonl` to
+ * Atomically back up a session's `.jsonl` transcript and metadata to
  * `~/.neovate-desktop/rewind-history/<sessionId>/<timestamp>.jsonl`,
- * write a `<timestamp>.meta.json` companion, then delete the original.
+ * write a `<timestamp>.meta.json` companion, then delete the originals.
  * Delete only runs after the copy has succeeded.
  */
 export async function archiveSessionFiles(
@@ -187,7 +389,6 @@ export async function archiveSessionFiles(
   const matches = await listSessionFiles(`${sessionId}.jsonl`);
   if (matches.length === 0) {
     log("archiveSessionFiles: no file found for sessionId=%s", sessionId);
-    return;
   }
 
   const backupDir = path.join(APP_DATA_DIR, "rewind-history", sessionId);
@@ -196,7 +397,9 @@ export async function archiveSessionFiles(
   const now = new Date();
   const timestamp = now.toISOString().replace(/:/g, "-").replace(/\./g, "-");
 
-  await copyFile(matches[0], path.join(backupDir, `${timestamp}.jsonl`));
+  if (matches.length > 0) {
+    await copyFile(matches[0], path.join(backupDir, `${timestamp}.jsonl`));
+  }
 
   const metaJson = JSON.stringify(
     {
@@ -206,6 +409,9 @@ export async function archiveSessionFiles(
       restoreFiles: meta.restoreFiles,
       title: meta.title,
       cwd: meta.cwd,
+      kind: (meta as Record<string, unknown>).kind,
+      groupId: (meta as Record<string, unknown>).groupId,
+      groupMembers: (meta as Record<string, unknown>).groupMembers,
       backedUpAt: now.toISOString(),
     },
     null,
@@ -213,19 +419,36 @@ export async function archiveSessionFiles(
   );
   await writeFile(path.join(backupDir, `${timestamp}.meta.json`), metaJson, "utf-8");
 
+  // Also back up the independent metadata file if it exists
+  const metaPath = getMetaPath(sessionId);
+  try {
+    await copyFile(metaPath, path.join(backupDir, `${timestamp}.session-meta.json`));
+  } catch {
+    // noop: metadata file may not exist (legacy session)
+  }
+
   log("archiveSessionFiles: backed up sessionId=%s to %s", sessionId, backupDir);
 
-  // Delete original only after backup succeeds
-  for (const file of matches) {
-    try {
-      await unlink(file);
-      log("archiveSessionFiles: deleted %s", file);
-    } catch (error) {
-      log(
-        "archiveSessionFiles: failed to delete %s error=%s",
-        file,
-        error instanceof Error ? error.message : error,
-      );
+  // Delete originals only after backup succeeds
+  if (matches.length > 0) {
+    for (const file of matches) {
+      try {
+        await unlink(file);
+        log("archiveSessionFiles: deleted %s", file);
+      } catch (error) {
+        log(
+          "archiveSessionFiles: failed to delete %s error=%s",
+          file,
+          error instanceof Error ? error.message : error,
+        );
+      }
     }
+  }
+
+  // Clean up independent metadata
+  try {
+    await unlink(metaPath);
+  } catch {
+    // noop
   }
 }

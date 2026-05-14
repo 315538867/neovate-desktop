@@ -1,6 +1,13 @@
 import { create } from "zustand";
 
-export type SettingsMenuId = "general" | "agents" | "rules" | "keybindings" | "providers" | "about";
+export type SettingsMenuId =
+  | "general"
+  | "agents"
+  | "rules"
+  | "keybindings"
+  | "providers"
+  | "about"
+  | "groups";
 
 interface SettingsUIState {
   showSettings: boolean;

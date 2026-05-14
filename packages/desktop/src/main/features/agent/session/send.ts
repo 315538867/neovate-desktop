@@ -48,6 +48,8 @@ export interface SendContext {
   // eventPublisher is unused today but matches the InitContext shape so
   // future cross-cutting events (e.g. send-failed) can be published here.
   eventPublisher: EventPublisher<Record<string, ClaudeCodeUIEvent>>;
+  /** Restart the consume loop when it has exited due to an SDK error. */
+  restartConsume: (sessionId: string) => Promise<void>;
 }
 
 /**
@@ -63,7 +65,9 @@ export async function sendUserMessage(
 
   const session = sessions.get(sessionId);
   if (!session) throw new Error(`Unknown session: ${sessionId}`);
-  if (session.consumeExited) throw new Error(`Session consume loop has exited: ${sessionId}`);
+  if (session.consumeExited) {
+    await ctx.restartConsume(sessionId);
+  }
 
   // UIMessage -> SDKUserMessage: collapse text + slash-command parts back to
   // their plain-text form (e.g. `data-slash-command{name:"zcf:workflow"}` →
@@ -84,6 +88,8 @@ export async function sendUserMessage(
         createdAt: now,
         updatedAt: now,
         title: text.slice(0, 50),
+        kind: session.kind,
+        groupId: session.groupId,
       },
     });
   }

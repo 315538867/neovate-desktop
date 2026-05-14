@@ -5,11 +5,12 @@ import type { ComponentProps, ReactNode } from "react";
 
 import { useControllableState } from "@radix-ui/react-use-controllable-state";
 import { BrainIcon, ChevronDownIcon, DotIcon } from "lucide-react";
-import { createContext, memo, useContext, useMemo } from "react";
+import { createContext, memo, useCallback, useContext, useMemo } from "react";
 
 import { cn } from "../../lib/utils";
 import { Badge } from "../ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
+import { useConversationContext } from "./conversation";
 
 interface ChainOfThoughtContextValue {
   isOpen: boolean;
@@ -41,9 +42,22 @@ export const ChainOfThought = memo(
     children,
     ...props
   }: ChainOfThoughtProps) => {
+    // Pre-mask the conversation pinned-state on close so the height shrink
+    // doesn't trigger a scrollTop-clamp re-pin (mirrors reasoning.tsx). The
+    // pinned-state hook's defense-in-depth is the 600ms mask after every
+    // collapse close — ChainOfThought is a load-bearing component.
+    const { notifyHeightShrink } = useConversationContext();
+    const handleOpenChange = useCallback(
+      (newOpen: boolean) => {
+        if (!newOpen) notifyHeightShrink();
+        onOpenChange?.(newOpen);
+      },
+      [notifyHeightShrink, onOpenChange],
+    );
+
     const [isOpen, setIsOpen] = useControllableState({
       defaultProp: defaultOpen,
-      onChange: onOpenChange,
+      onChange: handleOpenChange,
       prop: open,
     });
 

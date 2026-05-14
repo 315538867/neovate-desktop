@@ -48,6 +48,8 @@ export const sessionContract = {
           cwd: z.string(),
           model: z.string().optional(),
           providerId: z.string().nullable().optional(),
+          kind: z.enum(["single", "group"]).optional(),
+          groupId: z.string().optional(),
         }),
       )
       .output(

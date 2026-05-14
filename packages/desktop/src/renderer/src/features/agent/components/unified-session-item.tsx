@@ -33,6 +33,8 @@ export const UnifiedSessionItem = memo(
     const title = item.kind === "memory" ? item.session.title : item.info.title;
     const createdAt = item.kind === "memory" ? item.session.createdAt : item.info.createdAt;
     const isNew = item.kind === "memory" ? item.session.isNew : false;
+    const kind = item.kind === "memory" ? item.session.kind : item.info.kind;
+    const groupId = item.kind === "memory" ? item.session.groupId : item.info.groupId;
     const { isStreaming, hasPendingRequests } = useSessionChatStatus(sessionId);
     const turnResult = useUnseenTurnResult(sessionId);
 
@@ -69,6 +71,8 @@ export const UnifiedSessionItem = memo(
         optionHeld={optionHeld}
         onClick={handleClick}
         projectPath={item.projectPath}
+        kind={kind}
+        groupId={groupId}
       />
     );
   },
@@ -84,7 +88,9 @@ export const UnifiedSessionItem = memo(
     itemTitle(prev.item) === itemTitle(next.item) &&
     itemCreatedAt(prev.item) === itemCreatedAt(next.item) &&
     itemIsNew(prev.item) === itemIsNew(next.item) &&
-    prev.item.kind === next.item.kind,
+    prev.item.kind === next.item.kind &&
+    itemConversationKind(prev.item) === itemConversationKind(next.item) &&
+    itemGroupId(prev.item) === itemGroupId(next.item),
 );
 
 function itemId(item: UnifiedItem) {
@@ -98,4 +104,10 @@ function itemCreatedAt(item: UnifiedItem) {
 }
 function itemIsNew(item: UnifiedItem) {
   return item.kind === "memory" ? item.session.isNew : false;
+}
+function itemConversationKind(item: UnifiedItem) {
+  return item.kind === "memory" ? item.session.kind : item.info.kind;
+}
+function itemGroupId(item: UnifiedItem) {
+  return item.kind === "memory" ? item.session.groupId : item.info.groupId;
 }
