@@ -24,6 +24,7 @@ export function UserMenu() {
             size="icon-sm"
             className="rounded-full border border-border/60 hover:border-border"
             title={t("user.menu")}
+            data-test-id="user-menu-trigger"
           />
         }
       >

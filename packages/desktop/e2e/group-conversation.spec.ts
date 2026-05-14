@@ -19,7 +19,8 @@ test.describe("Group Conversation", () => {
     await electronApp.firstWindow();
     await expect(window.locator("[data-test-id='project-selector']")).toBeVisible();
 
-    // 2. Open settings and create a group
+    // 2. Open user menu, navigate to settings, and create a group
+    await window.locator("[data-test-id='user-menu-trigger']").click();
     await window.locator("[data-test-id='settings-trigger']").click();
     await window.locator("[data-test-id='settings-nav-groups']").click();
     await window.locator("[data-test-id='group-create-btn']").click();
