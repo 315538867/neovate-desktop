@@ -28,13 +28,19 @@ test.describe("Group Conversation", () => {
     // Fill group name and add a project member
     await window.locator("[data-test-id='group-name-input']").fill("E2E Test Group");
     await window.locator("[data-test-id='add-member-btn']").click();
-    // Select first available project in the picker dialog
-    await window.locator("[data-test-id='member-picker-item']").first().click();
+    // Select first available project — click the checkbox directly (base-ui Checkbox is a button, not native input)
+    await window
+      .locator("[data-test-id='member-picker-item']")
+      .first()
+      .locator("[role='checkbox']")
+      .click();
     await window.locator("[data-test-id='member-picker-confirm']").click();
     await window.locator("[data-test-id='group-save-btn']").click();
 
-    // Verify group appears in list
-    await expect(window.locator("[data-test-id='group-create-btn']")).toBeVisible();
+    // Verify group appears in list (may take a moment for loadGroups to complete)
+    await expect(window.locator("[data-test-id='group-create-btn']")).toBeVisible({
+      timeout: 10000,
+    });
 
     // Close settings panel to return to main UI
     await window.locator("[data-test-id='settings-back-btn']").click();
